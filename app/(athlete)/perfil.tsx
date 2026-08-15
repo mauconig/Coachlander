@@ -1,0 +1,148 @@
+import { router } from 'expo-router';
+import { Pressable, StyleSheet, View } from 'react-native';
+
+import { Avatar } from '@/components/Avatar';
+import { Card } from '@/components/Card';
+import { Icon } from '@/components/Icon';
+import { Screen } from '@/components/Screen';
+import { StatTile } from '@/components/StatTile';
+import { Txt } from '@/components/Txt';
+import { resetToSeed } from '@/db/migrate';
+import { getAthlete, getCoach, getSettings } from '@/db/queries';
+import { useMutation, useQuery } from '@/db/useQuery';
+import { num } from '@/lib/format';
+import { useApp } from '@/state/AppState';
+import { color, radius } from '@/theme/tokens';
+
+/** 06 · Perfil del alumno */
+export default function AthleteProfile() {
+  const { unit, switchRole, signOut } = useApp();
+  const athlete = useQuery(getAthlete);
+  const coach = useQuery(getCoach);
+  const settings = useQuery((db) => getSettings(db, 'athlete'));
+  const resetDatabase = useMutation(resetToSeed);
+
+  return (
+    <Screen scroll gap={16}>
+      <View style={styles.identity}>
+        <Avatar name={athlete.name} size={72} />
+        <View style={styles.identityText}>
+          <Txt variant="h3">{athlete.name}</Txt>
+          <Txt variant="meta">{athlete.goal}</Txt>
+        </View>
+      </View>
+
+      <Card tone="violet" padding={18} style={styles.coach}>
+        <Avatar name={coach.name} size={46} tone="lime" />
+        <View style={styles.coachText}>
+          <Txt variant="label" tone={color.onViolet}>
+            TU ENTRENADORA
+          </Txt>
+          <Txt variant="h5">{coach.name}</Txt>
+        </View>
+        <Pressable style={styles.write} accessibilityRole="button">
+          <Txt variant="labelTight" tone={color.text}>
+            ESCRIBIR
+          </Txt>
+        </Pressable>
+      </Card>
+
+      <View style={styles.grid}>
+        <View style={styles.gridRow}>
+          <StatTile value={num(athlete.weightKg)} unit={unit} label="PESO ACTUAL" />
+          <StatTile value={num(athlete.heightM)} unit="m" label="ALTURA" />
+        </View>
+        <View style={styles.gridRow}>
+          <StatTile
+            value={String(athlete.totalSessions)}
+            label="SESIONES TOTALES"
+            valueTone={color.lime}
+          />
+          <StatTile
+            value={String(athlete.streakWeeks)}
+            label="SEMANAS SEGUIDAS"
+            valueTone={color.lime}
+          />
+        </View>
+      </View>
+
+      <View style={styles.settings}>
+        {settings.map((item, i) => (
+          <Pressable
+            key={item.id}
+            accessibilityRole="button"
+            style={[styles.setting, i < settings.length - 1 && styles.settingDivider]}
+          >
+            <Txt variant="bodyStrong" style={styles.settingLabel}>
+              {item.label}
+            </Txt>
+            {item.value ? (
+              <Txt variant="meta" tone={item.accent ? color.lime : color.textMuted}>
+                {item.value}
+              </Txt>
+            ) : null}
+            <Icon name="chevron-right" size={14} tone={color.textMuted} />
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Role switching is in the design's copy ("podés cambiarlo después
+          desde tu perfil") — this is where it lives. */}
+      <View style={styles.footer}>
+        <Pressable
+          onPress={() => {
+            switchRole('coach');
+            router.replace('/alumnos');
+          }}
+          accessibilityRole="button"
+        >
+          <Txt variant="body" tone={color.textFaint} center>
+            Cambiar a modo entrenador
+          </Txt>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            signOut();
+            router.replace('/bienvenida');
+          }}
+          accessibilityRole="button"
+        >
+          <Txt variant="body" tone={color.textFaint} center>
+            Cerrar sesión
+          </Txt>
+        </Pressable>
+        <Pressable onPress={resetDatabase} accessibilityRole="button">
+          <Txt variant="body" tone={color.textFaint} center>
+            Restablecer datos de ejemplo
+          </Txt>
+        </Pressable>
+      </View>
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  identity: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  identityText: { flex: 1, gap: 4 },
+  coach: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  coachText: { flex: 1, gap: 2 },
+  write: {
+    backgroundColor: color.onVioletFill,
+    borderRadius: radius.pill,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  grid: { gap: 9 },
+  gridRow: { flexDirection: 'row', gap: 9 },
+  settings: {
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+  },
+  setting: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  settingDivider: { borderBottomWidth: 1, borderBottomColor: color.hairline },
+  settingLabel: { flex: 1 },
+  footer: { gap: 14, paddingTop: 6 },
+});
