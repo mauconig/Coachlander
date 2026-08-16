@@ -81,6 +81,10 @@ export default function RootLayout() {
                   animation: 'slide_from_right',
                 }}
               >
+                {/* Bootstrap already owns the loading transition; do not slide the tab shell in after it. */}
+                <Stack.Screen name="index" options={{ animation: 'none' }} />
+                <Stack.Screen name="(athlete)" options={{ animation: 'none' }} />
+                <Stack.Screen name="(coach)" options={{ animation: 'none' }} />
                 <Stack.Screen name="sesion" options={{ animation: 'slide_from_bottom' }} />
               </Stack>
             </AppStateProvider>

@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { selectCurrentRoutine } from '@/api/client';
 import { Avatar } from '@/components/Avatar';
@@ -117,9 +117,14 @@ export default function Today() {
                   >
                     {option.name}
                   </Txt>
-                  <Txt variant="meta" tone={selected ? color.onViolet : color.textMuted}>
-                    {`${option.exerciseCount} ${option.exerciseCount === 1 ? 'ejercicio' : 'ejercicios'}`}
-                  </Txt>
+                  <View style={styles.optionFooter}>
+                    <Txt variant="meta" tone={selected ? color.onViolet : color.textMuted}>
+                      {`${option.exerciseCount} ${option.exerciseCount === 1 ? 'ejercicio' : 'ejercicios'}`}
+                    </Txt>
+                    {selectingRoutineId === option.id ? (
+                      <ActivityIndicator size="small" color={color.lime} />
+                    ) : null}
+                  </View>
                 </Pressable>
               );
             })}
@@ -199,6 +204,7 @@ const styles = StyleSheet.create({
   },
   routineOptionSelected: { backgroundColor: color.violet, borderColor: color.lime },
   optionName: { flex: 1 },
+  optionFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   optionPressed: { opacity: 0.82 },
   optionLoading: { opacity: 0.55 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },

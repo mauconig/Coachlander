@@ -87,6 +87,43 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+async function publicRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...init?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    let message = `API ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // Keep the HTTP status when the server did not return JSON.
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return (await response.json()) as T;
+}
+
+export function resetEphemeralTestAccount(email: string, password: string) {
+  return publicRequest<{ ok: true }>('/v1/test-accounts/ephemeral/reset', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function deleteEphemeralTestAccount(tokenProvider: TokenProvider) {
+  return request<{ ok: true }>(tokenProvider, '/v1/test-accounts/ephemeral', {
+    method: 'DELETE',
+  });
+}
+
 export function getBootstrap(tokenProvider: TokenProvider) {
   return request<RemoteBootstrap>(tokenProvider, '/v1/bootstrap');
 }

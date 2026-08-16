@@ -10,7 +10,8 @@ import {
   type ReactNode,
 } from 'react';
 
-import { getBootstrap, updateProfile } from '@/api/client';
+import { deleteEphemeralTestAccount, getBootstrap, updateProfile } from '@/api/client';
+import { EPHEMERAL_TEST_EMAIL } from '@/config/runtime';
 import type { Role, Unit } from '@/data/types';
 import {
   emptyRemoteData,
@@ -52,7 +53,7 @@ type AppState = {
   patchDraft: (patch: Partial<OnboardingDraft>) => void;
   /** completes onboarding and drops the user into their role's tabs */
   finishOnboarding: () => void;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   switchRole: (role: Role) => void;
 };
 
@@ -142,6 +143,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     [remoteData],
   );
 
+  const signOut = useCallback(async () => {
+    const currentEmail = remoteData.user?.email?.trim().toLowerCase() ?? '';
+    if (EPHEMERAL_TEST_EMAIL && currentEmail === EPHEMERAL_TEST_EMAIL) {
+      await deleteEphemeralTestAccount(getToken);
+    }
+
+    try {
+      await clerkSignOut();
+    } finally {
+      setRemoteData(emptyRemoteData);
+      setRemoteStatus('idle');
+      setDraft(emptyDraft);
+      setRole('athlete');
+    }
+  }, [clerkSignOut, emptyDraft, getToken, remoteData.user?.email]);
+
   const value = useMemo<AppState>(
     () => ({
       authReady: isLoaded,
@@ -185,13 +202,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           console.warn('[Coachlander] No se pudo guardar el perfil', error);
         });
       },
-      signOut: () => {
-        void clerkSignOut();
-        setRemoteData(emptyRemoteData);
-        setRemoteStatus('idle');
-        setDraft(emptyDraft);
-        setRole('athlete');
-      },
+      signOut,
       switchRole: (nextRole) => {
         setRole(nextRole);
         setRemoteData((current) =>
@@ -207,7 +218,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         });
       },
     }),
-    [clerkSignOut, draft, emptyDraft, getToken, isLoaded, isSignedIn, patchDraft, refreshRemoteData, remoteStatus, role],
+    [draft, getToken, isLoaded, isSignedIn, patchDraft, refreshRemoteData, remoteStatus, role, signOut],
   );
 
   return (

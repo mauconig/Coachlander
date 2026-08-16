@@ -169,8 +169,14 @@ export default function AthleteProfile() {
         </Pressable>
         <Pressable
           onPress={() => {
-            signOut();
-            router.replace('/bienvenida');
+            void signOut()
+              .then(() => router.replace('/bienvenida'))
+              .catch((error: unknown) => {
+                Alert.alert(
+                  'No pudimos cerrar la sesiÃ³n',
+                  error instanceof Error ? error.message : 'ProbÃ¡ nuevamente.',
+                );
+              });
           }}
           accessibilityRole="button"
         >

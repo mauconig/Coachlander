@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 import cors from '@fastify/cors';
 import Fastify from 'fastify';
@@ -15,6 +15,9 @@ const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
 const deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
 const deepseekModel = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 const adminClerkUserId = process.env.ADMIN_CLERK_USER_ID?.trim() ?? '';
+const ephemeralTestEnabled = process.env.ENABLE_EPHEMERAL_TEST_ACCOUNT === 'true';
+const ephemeralTestEmail = process.env.EPHEMERAL_TEST_EMAIL?.trim().toLowerCase() ?? '';
+const ephemeralTestPassword = process.env.EPHEMERAL_TEST_PASSWORD ?? '';
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 if (!clerkSecretKey) throw new Error('CLERK_SECRET_KEY is required');
@@ -173,6 +176,95 @@ app.get('/healthz', async () => {
 
 app.get('/v1/bootstrap', { preHandler: authenticate }, async (request) => {
   return readBootstrap(request.userId);
+});
+
+function secretMatches(received, expected) {
+  const receivedBuffer = Buffer.from(received);
+  const expectedBuffer = Buffer.from(expected);
+  return receivedBuffer.length === expectedBuffer.length && timingSafeEqual(receivedBuffer, expectedBuffer);
+}
+
+async function exactClerkUsersByEmail(email) {
+  const result = await clerk.users.getUserList({ emailAddress: [email], limit: 10 });
+  return result.data.filter((user) =>
+    user.emailAddresses.some((address) => address.emailAddress.trim().toLowerCase() === email),
+  );
+}
+
+async function removeUserData(userId) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await removeAthleteRoutines(client, userId);
+    await client.query('DELETE FROM app_user WHERE clerk_user_id = $1', [userId]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+let ephemeralResetInProgress = false;
+
+app.post('/v1/test-accounts/ephemeral/reset', async (request, reply) => {
+  if (!ephemeralTestEnabled || !ephemeralTestEmail || !ephemeralTestPassword) {
+    return reply.code(404).send({ error: 'La cuenta temporal no estÃ¡ habilitada' });
+  }
+
+  const email = typeof request.body?.email === 'string' ? request.body.email.trim().toLowerCase() : '';
+  const password = typeof request.body?.password === 'string' ? request.body.password : '';
+  if (email !== ephemeralTestEmail || !secretMatches(password, ephemeralTestPassword)) {
+    return reply.code(403).send({ error: 'Credenciales temporales incorrectas' });
+  }
+  if (ephemeralResetInProgress) {
+    return reply.code(409).send({ error: 'La cuenta temporal se estÃ¡ reiniciando; probÃ¡ de nuevo' });
+  }
+
+  ephemeralResetInProgress = true;
+  try {
+    const existingUsers = await exactClerkUsersByEmail(email);
+    for (const user of existingUsers) {
+      await removeUserData(user.id);
+      await clerk.users.deleteUser(user.id);
+    }
+
+    await clerk.users.createUser({
+      emailAddress: [email],
+      password,
+      firstName: 'Ejemplo',
+      lastName: 'Temporal',
+      unsafeMetadata: { displayName: 'Ejemplo Temporal', ephemeralTest: true },
+      skipPasswordChecks: true,
+    });
+    return reply.code(201).send({ ok: true });
+  } catch (error) {
+    request.log.error({ error }, 'Ephemeral test account reset failed');
+    return reply.code(500).send({ error: 'No pudimos preparar la cuenta temporal' });
+  } finally {
+    ephemeralResetInProgress = false;
+  }
+});
+
+app.delete('/v1/test-accounts/ephemeral', { preHandler: authenticate }, async (request, reply) => {
+  if (!ephemeralTestEnabled || !ephemeralTestEmail) {
+    return reply.code(404).send({ error: 'La cuenta temporal no estÃ¡ habilitada' });
+  }
+
+  const user = await ensureUser(request.userId);
+  if (user.email?.trim().toLowerCase() !== ephemeralTestEmail) {
+    return reply.code(403).send({ error: 'Esta cuenta no es temporal' });
+  }
+
+  try {
+    await removeUserData(request.userId);
+    await clerk.users.deleteUser(request.userId);
+    return reply.send({ ok: true });
+  } catch (error) {
+    request.log.error({ error, userId: request.userId }, 'Ephemeral test account deletion failed');
+    return reply.code(500).send({ error: 'No pudimos borrar la cuenta temporal' });
+  }
 });
 
 const importSystemPrompt = `

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { Card } from '@/components/Card';
@@ -84,8 +84,14 @@ export default function CoachProfile() {
         </Pressable>
         <Pressable
           onPress={() => {
-            signOut();
-            router.replace('/bienvenida');
+            void signOut()
+              .then(() => router.replace('/bienvenida'))
+              .catch((error: unknown) => {
+                Alert.alert(
+                  'No pudimos cerrar la sesiÃ³n',
+                  error instanceof Error ? error.message : 'ProbÃ¡ nuevamente.',
+                );
+              });
           }}
           accessibilityRole="button"
         >

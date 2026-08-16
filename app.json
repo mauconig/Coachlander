@@ -18,6 +18,7 @@
     },
     "android": {
       "package": "com.coachlander.tempo",
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",

@@ -7,6 +7,7 @@ import { Card } from '@/components/Card';
 import { Heading } from '@/components/Note';
 import { StepProgress } from '@/components/Progress';
 import { Screen } from '@/components/Screen';
+import { RoleSkeletonScreen } from '@/components/Skeleton';
 import { RadioDot } from '@/components/Toggle';
 import { BackButton } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
@@ -46,12 +47,7 @@ export default function RolePicker() {
   }
 
   if (remoteStatus !== 'ready') {
-    return (
-      <AppLoadingScreen
-        title="Cargando tu cuenta"
-        detail="Estamos preparando las preguntas para configurar tu espacio."
-      />
-    );
+    return <RoleSkeletonScreen />;
   }
 
   const next = () => router.push(draft.role === 'coach' ? '/datos' : '/codigo');

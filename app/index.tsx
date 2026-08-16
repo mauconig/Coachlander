@@ -1,11 +1,20 @@
-import { Redirect } from 'expo-router';
+import { Redirect, router } from 'expo-router';
+import { useEffect, useRef } from 'react';
 
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
+import { WorkspaceSkeletonScreen } from '@/components/Skeleton';
 import { useApp } from '@/state/AppState';
 
 /** Sends the app to onboarding, or to the tab set for the signed-in role. */
 export default function Entry() {
   const { authReady, signedIn, remoteStatus, retryRemoteData, role } = useApp();
+  const redirecting = useRef(false);
+
+  useEffect(() => {
+    if (!authReady || !signedIn || remoteStatus !== 'ready' || redirecting.current) return;
+    redirecting.current = true;
+    router.replace(role === 'coach' ? '/alumnos' : '/hoy');
+  }, [authReady, remoteStatus, role, signedIn]);
 
   if (!authReady) {
     return <AppLoadingScreen title="Conectando con Coachlander" detail="Verificando tu sesión." />;
@@ -23,7 +32,8 @@ export default function Entry() {
     );
   }
   if (remoteStatus !== 'ready') {
-    return <AppLoadingScreen title="Preparando tu espacio" detail="Estamos cargando tus datos." />;
+    return <WorkspaceSkeletonScreen />;
   }
-  return <Redirect href={role === 'coach' ? '/alumnos' : '/hoy'} />;
+  // Keep the skeleton visible until the destination screen has mounted.
+  return <WorkspaceSkeletonScreen />;
 }

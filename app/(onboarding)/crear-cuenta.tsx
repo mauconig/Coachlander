@@ -1,10 +1,21 @@
 import { useSignIn, useSignUp } from '@clerk/expo';
 import { useSSO } from '@clerk/expo/experimental';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  findNodeHandle,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native';
 
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
+import { resetEphemeralTestAccount } from '@/api/client';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
 import { Heading, OrDivider } from '@/components/Note';
@@ -12,6 +23,7 @@ import { Screen } from '@/components/Screen';
 import { BackButton } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
 import { useApp } from '@/state/AppState';
+import { EPHEMERAL_TEST_EMAIL } from '@/config/runtime';
 import { color, radius } from '@/theme/tokens';
 
 type Mode = 'sign-up' | 'sign-in';
@@ -40,13 +52,58 @@ export default function CreateAccount() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [socialBusy, setSocialBusy] = useState<'google' | 'apple' | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffsetRef = useRef(0);
   const { signUp, errors: signUpErrors, fetchStatus: signUpStatus } = useSignUp();
   const { signIn, errors: signInErrors, fetchStatus: signInStatus } = useSignIn();
   const { startSSOFlow } = useSSO();
 
+  const bringInputIntoView = (input: TextInput) => {
+    const node = findNodeHandle(input);
+    if (node == null) return;
+
+    const scrollToInput = () => {
+      scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(node, 36, true);
+      const keyboardTop = Keyboard.metrics()?.screenY;
+      if (keyboardTop == null) return;
+
+      input.measureInWindow((_x, y, _width, height) => {
+        const overflow = y + height - keyboardTop + 24;
+        if (overflow > 0) {
+          scrollRef.current?.scrollTo({
+            y: scrollOffsetRef.current + overflow,
+            animated: true,
+          });
+        }
+      });
+    };
+
+    const keyboardSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      scrollToInput();
+      keyboardSubscription.remove();
+    });
+    setTimeout(() => {
+      keyboardSubscription.remove();
+      scrollToInput();
+    }, 800);
+  };
+
+  const bringPasswordIntoView = (_input: TextInput) => {
+    const passwordScrollOffset = 280;
+    const scrollToPassword = () => {
+      requestAnimationFrame(() => {
+        scrollRef.current?.scrollTo({ y: passwordScrollOffset, animated: true });
+      });
+    };
+
+    scrollToPassword();
+    setTimeout(scrollToPassword, 250);
+    setTimeout(scrollToPassword, 800);
+  };
+
   const busy = submitting || socialBusy !== null || signUpStatus === 'fetching' || signInStatus === 'fetching';
 
-  const finalize = async (kind: Mode) => {
+  const finalize = async (kind: Mode, destination?: '/rol' | '/') => {
     const resource = kind === 'sign-up' ? signUp : signIn;
     const result = await resource.finalize({
       navigate: ({ session }) => {
@@ -54,7 +111,7 @@ export default function CreateAccount() {
           setError('Tu cuenta requiere un paso adicional antes de entrar.');
           return;
         }
-        router.replace(kind === 'sign-up' ? '/rol' : '/');
+        router.replace(destination ?? (kind === 'sign-up' ? '/rol' : '/'));
       },
     });
     if (result.error) setError(errorMessage(result.error));
@@ -66,6 +123,22 @@ export default function CreateAccount() {
 
     try {
       if (mode === 'sign-up') {
+      const normalizedEmail = draft.email.trim().toLowerCase();
+      if (!needsVerification && EPHEMERAL_TEST_EMAIL && normalizedEmail === EPHEMERAL_TEST_EMAIL) {
+        await resetEphemeralTestAccount(normalizedEmail, draft.password);
+        await signIn.reset();
+        const testSignIn = await signIn.password({
+          emailAddress: normalizedEmail,
+          password: draft.password,
+        });
+        if (testSignIn.error) {
+          setError(errorMessage(testSignIn.error));
+          return;
+        }
+        await finalize('sign-in', '/rol');
+        return;
+      }
+
       if (needsVerification) {
         const result = await signUp.verifications.verifyEmailCode({ code: verificationCode.trim() });
         if (result.error) {
@@ -180,11 +253,18 @@ export default function CreateAccount() {
     <Screen>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          onScroll={(event) => {
+            scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+          }}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
         >
           <BackButton />
@@ -215,6 +295,7 @@ export default function CreateAccount() {
                 onChangeText={(name) => patchDraft({ name })}
                 placeholder="Nombre y apellido"
                 autoCapitalize="words"
+                onFocusInput={bringInputIntoView}
               />
             ) : null}
             {!needsVerification ? (
@@ -226,12 +307,14 @@ export default function CreateAccount() {
                   placeholder="tu@mail.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  onFocusInput={bringInputIntoView}
                 />
                 <Field
                   label="CONTRASEÑA"
                   value={draft.password}
                   onChangeText={(password) => patchDraft({ password })}
                   secure
+                  onFocusInput={bringPasswordIntoView}
                   hint="Mínimo 8 caracteres"
                 />
               </>
@@ -244,6 +327,7 @@ export default function CreateAccount() {
                 keyboardType="number-pad"
                 autoCapitalize="none"
                 autoFocus
+                onFocusInput={bringPasswordIntoView}
               />
             )}
           </View>
