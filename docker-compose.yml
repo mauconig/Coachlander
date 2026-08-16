@@ -29,6 +29,7 @@ services:
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
       DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-v4-flash}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      ADMIN_CLERK_USER_ID: ${ADMIN_CLERK_USER_ID:-}
       PORT: 8782
     ports:
       - "127.0.0.1:8782:8782"

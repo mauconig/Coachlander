@@ -1,6 +1,9 @@
+import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
-import { StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
+import { selectCurrentRoutine } from '@/api/client';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
@@ -10,20 +13,42 @@ import { Row, RowIndex } from '@/components/Row';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
-import { getAthlete, getRoutineSetCount, getTodayRoutine } from '@/db/queries';
+import { getAthlete, getRoutineOptions, getRoutineSetCount, getTodayRoutine } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { longDate, num, weight } from '@/lib/format';
 import { useApp } from '@/state/AppState';
+import { useRemoteData, useRefreshRemoteData } from '@/state/RemoteState';
 import { color } from '@/theme/tokens';
 
 /** 01 · Hoy — the athlete's home: what to train, and the play button. */
 export default function Today() {
+  const { getToken } = useAuth();
   const { unit, draft } = useApp();
+  const remoteData = useRemoteData();
+  const refreshRemoteData = useRefreshRemoteData();
   const athlete = useQuery(getAthlete);
   const routine = useQuery(getTodayRoutine);
+  const routineOptions = useQuery(getRoutineOptions);
   const totalSets = useQuery(getRoutineSetCount);
+  const [selectingRoutineId, setSelectingRoutineId] = useState<string | null>(null);
+  const [selectionError, setSelectionError] = useState('');
+  const isAdmin = remoteData.user?.isAdmin === true;
 
-  if (draft.soloTraining || !routine.id) {
+  const chooseRoutine = async (routineId: string) => {
+    if (routineId === routine.id || selectingRoutineId) return;
+    setSelectingRoutineId(routineId);
+    setSelectionError('');
+    try {
+      await selectCurrentRoutine(getToken, routineId);
+      await refreshRemoteData();
+    } catch (error: unknown) {
+      setSelectionError(error instanceof Error ? error.message : 'No pudimos seleccionar la rutina.');
+    } finally {
+      setSelectingRoutineId(null);
+    }
+  };
+
+  if (!routine.id) {
     return (
       <Screen scroll gap={18}>
         <View style={styles.header}>
@@ -56,6 +81,52 @@ export default function Today() {
         </View>
         <Avatar name={athlete.name} size={44} />
       </View>
+
+      {isAdmin && routineOptions.length > 1 ? (
+        <View style={styles.library}>
+          <SectionHeader title="ELEGÍ TU RUTINA" trailing={`${routineOptions.length} DÍAS`} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.libraryScroll}
+          >
+            {routineOptions.map((option) => {
+              const selected = option.id === routine.id;
+              return (
+                <Pressable
+                  key={option.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Día ${option.day}, ${option.name}`}
+                  disabled={!!selectingRoutineId}
+                  onPress={() => void chooseRoutine(option.id)}
+                  style={({ pressed }) => [
+                    styles.routineOption,
+                    selected && styles.routineOptionSelected,
+                    pressed && styles.optionPressed,
+                    selectingRoutineId === option.id && styles.optionLoading,
+                  ]}
+                >
+                  <Txt variant="label" tone={selected ? color.onViolet : color.lime}>
+                    {`DÍA ${option.day}`}
+                  </Txt>
+                  <Txt
+                    variant="rowTitle"
+                    tone={selected ? color.text : color.textSoft}
+                    numberOfLines={2}
+                    style={styles.optionName}
+                  >
+                    {option.name}
+                  </Txt>
+                  <Txt variant="meta" tone={selected ? color.onViolet : color.textMuted}>
+                    {`${option.exerciseCount} ${option.exerciseCount === 1 ? 'ejercicio' : 'ejercicios'}`}
+                  </Txt>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          {selectionError ? <Txt variant="meta" tone={color.textSoft}>{selectionError}</Txt> : null}
+        </View>
+      ) : null}
 
       <Card tone="violet" radius={26} padding={22} gap={16}>
         <View style={styles.cardHead}>
@@ -113,6 +184,23 @@ export default function Today() {
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   greeting: { gap: 3 },
+  library: { gap: 9 },
+  libraryScroll: { gap: 9, paddingRight: 24 },
+  routineOption: {
+    width: 190,
+    minHeight: 126,
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: color.surface,
+    borderWidth: 1,
+    borderColor: color.border,
+  },
+  routineOptionSelected: { backgroundColor: color.violet, borderColor: color.lime },
+  optionName: { flex: 1 },
+  optionPressed: { opacity: 0.82 },
+  optionLoading: { opacity: 0.55 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   weekPill: {
     backgroundColor: color.onVioletFill,

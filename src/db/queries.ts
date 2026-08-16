@@ -117,7 +117,9 @@ export function getTodayRoutine(data: RemoteData): Routine {
     data.user?.role === 'athlete'
       ? rows(data, 'routine').filter((row) => row.athlete_id === data.user?.id)
       : rows(data, 'routine');
-  const routineRow = routineRows.find((row) => booleanValue(row, 'is_today')) ?? routineRows[0];
+  const routineRow =
+    routineRows.find((row) => booleanValue(row, 'is_today')) ??
+    (data.user?.role === 'athlete' ? undefined : routineRows[0]);
   const routineId = stringValue(routineRow, 'id');
   const coachId = stringValue(routineRow, 'coach_id');
   const exerciseRows = rows(data, 'routine_exercise')
@@ -140,6 +142,44 @@ export function getTodayRoutine(data: RemoteData): Routine {
     secondsPerSet: numberValue(routineRow, 'seconds_per_set'),
     exercises,
   };
+}
+
+export type RoutineOption = {
+  id: string;
+  day: number;
+  name: string;
+  exerciseCount: number;
+  selected: boolean;
+};
+
+export function getRoutineOptions(data: RemoteData): RoutineOption[] {
+  const routineRows =
+    data.user?.role === 'athlete'
+      ? rows(data, 'routine').filter((row) => row.athlete_id === data.user?.id)
+      : rows(data, 'routine');
+  const selectedRow = routineRows.find((row) => booleanValue(row, 'is_today'));
+  const planId = selectedRow?.plan_id;
+  const planRows = planId
+    ? routineRows.filter((row) => row.plan_id === planId)
+    : selectedRow
+      ? routineRows.filter((row) => row.day === selectedRow.day)
+      : [];
+
+  return [...planRows]
+    .sort((a, b) => numberValue(a, 'day') - numberValue(b, 'day'))
+    .map((row) => {
+      const fullName = stringValue(row, 'name');
+      const separator = fullName.indexOf(' · ');
+      const name = separator >= 0 ? fullName.slice(separator + 3) : fullName;
+      const routineId = stringValue(row, 'id');
+      return {
+        id: routineId,
+        day: numberValue(row, 'day'),
+        name,
+        exerciseCount: rows(data, 'routine_exercise').filter((link) => link.routine_id === routineId).length,
+        selected: booleanValue(row, 'is_today'),
+      };
+    });
 }
 
 export function getRoutineSetCount(data: RemoteData): number {

@@ -61,7 +61,7 @@ export default function PasteRoutine() {
     return (
       <AppLoadingScreen
         title="Interpretando tu rutina"
-        detail="Estamos separando tus cuatro días y estimando cargas iniciales."
+        detail="Estamos detectando tus días y estimando cargas iniciales."
       />
     );
   }

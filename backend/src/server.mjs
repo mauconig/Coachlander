@@ -14,6 +14,7 @@ const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
 const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
 const deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
 const deepseekModel = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+const adminClerkUserId = process.env.ADMIN_CLERK_USER_ID?.trim() ?? '';
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 if (!clerkSecretKey) throw new Error('CLERK_SECRET_KEY is required');
@@ -157,6 +158,7 @@ async function readBootstrap(userId) {
       weightKg: user.weight_kg,
       heightM: user.height_m,
       soloTraining: user.solo_training,
+      isAdmin: Boolean(adminClerkUserId && user.clerk_user_id === adminClerkUserId),
     },
     tables,
   };
@@ -178,7 +180,9 @@ Sos el parser de rutinas de Coachlander. Recibís texto libre en español con un
 Devolvé únicamente JSON válido, sin markdown ni explicaciones fuera del JSON.
 
 Reglas obligatorias:
-- Separá la rutina en exactamente 4 días respetando el orden y los bloques del texto.
+- Detectá cuántos días tiene la rutina: puede tener entre 1 y 7 días.
+- Separá la rutina en esa cantidad de días respetando el orden y los bloques del texto.
+- No agregues días vacíos ni completes hasta siete si el texto tiene menos.
 - Conservá los nombres de los ejercicios tal como aparecen, corrigiendo sólo errores obvios de escritura.
 - "reps" debe ser un string corto: "8", "8-10" o "al fallo".
 - "sets" debe ser un entero positivo.
@@ -234,8 +238,8 @@ function normalizedInteger(value, fallback, min, max) {
 }
 
 function normalizeImportedDays(rawDays) {
-  if (!Array.isArray(rawDays) || rawDays.length !== 4) {
-    throw new Error('DeepSeek debe devolver exactamente cuatro días');
+  if (!Array.isArray(rawDays) || rawDays.length < 1 || rawDays.length > 7) {
+    throw new Error('DeepSeek debe devolver entre uno y siete días');
   }
 
   return rawDays.map((rawDay, dayIndex) => {
@@ -300,7 +304,7 @@ async function interpretRoutine({ text, weightKg, heightM }) {
                 heightM: Number.isFinite(heightM) ? heightM : null,
               },
               routineText: text,
-              instruction: 'Separá en cuatro días y devolvé JSON.',
+              instruction: 'Detectá la cantidad real de días, entre 1 y 7, y devolvé JSON sin agregar días.',
             }),
           },
         ],
@@ -368,9 +372,10 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
   await ensureUser(request.userId);
   const client = await pool.connect();
   const routineIds = [];
+  const planId = `plan-${randomUUID()}`;
   try {
     await client.query('BEGIN');
-    await client.query('UPDATE routine SET is_today = 0 WHERE athlete_id = $1', [request.userId]);
+    await removeAthleteRoutines(client, request.userId);
 
     for (const [dayIndex, day] of days.entries()) {
       const routineId = `routine-${randomUUID()}`;
@@ -378,10 +383,11 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
       const totalSets = day.exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
       await client.query(
         `INSERT INTO routine
-          (id, name, block, week, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today)
-         VALUES ($1, $2, $3, 1, $4, NULL, $5, $6, 45, $7)`,
+          (id, plan_id, name, block, week, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today)
+         VALUES ($1, $2, $3, $4, 1, $5, NULL, $6, $7, 45, $8)`,
         [
           routineId,
+          planId,
           `${routineName} · ${day.name}`,
           'Importada',
           dayIndex + 1,
@@ -419,11 +425,90 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
     }
 
     await client.query('COMMIT');
-    return reply.code(201).send({ ok: true, routineIds });
+    return reply.code(201).send({ ok: true, planId, routineIds });
   } catch (error) {
     await client.query('ROLLBACK');
     request.log.error({ error }, 'Imported routine save failed');
     return reply.code(500).send({ error: 'No pudimos guardar la rutina' });
+  } finally {
+    client.release();
+  }
+});
+
+async function removeAthleteRoutines(client, userId) {
+  const routines = await client.query('SELECT id FROM routine WHERE athlete_id = $1', [userId]);
+  const routineIds = routines.rows.map((row) => row.id);
+  if (!routineIds.length) return 0;
+
+  const exerciseLinks = await client.query(
+    'SELECT exercise_id FROM routine_exercise WHERE routine_id = ANY($1::text[])',
+    [routineIds],
+  );
+  const exerciseIds = [...new Set(exerciseLinks.rows.map((row) => row.exercise_id))];
+
+  await client.query('DELETE FROM routine_exercise WHERE routine_id = ANY($1::text[])', [routineIds]);
+  await client.query('DELETE FROM routine WHERE athlete_id = $1', [userId]);
+
+  if (exerciseIds.length) {
+    await client.query(
+      `DELETE FROM exercise
+       WHERE id = ANY($1::text[])
+         AND NOT EXISTS (SELECT 1 FROM routine_exercise WHERE exercise_id = exercise.id)`,
+      [exerciseIds],
+    );
+  }
+
+  return routineIds.length;
+}
+
+app.delete('/v1/routines/current', { preHandler: authenticate }, async (request, reply) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const deletedRoutines = await removeAthleteRoutines(client, request.userId);
+    await client.query('COMMIT');
+    return reply.send({ ok: true, deletedRoutines });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error }, 'Routine deletion failed');
+    return reply.code(500).send({ error: 'No pudimos eliminar la rutina' });
+  } finally {
+    client.release();
+  }
+});
+
+app.put('/v1/routines/current/selection', { preHandler: authenticate }, async (request, reply) => {
+  if (!adminClerkUserId || request.userId !== adminClerkUserId) {
+    return reply.code(403).send({ error: 'No tenés permiso para elegir rutinas' });
+  }
+
+  const routineId = textValue(request.body?.routineId);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a seleccionar' });
+
+  const selected = await pool.query(
+    'SELECT id, plan_id FROM routine WHERE id = $1 AND athlete_id = $2 LIMIT 1',
+    [routineId, request.userId],
+  );
+  const row = selected.rows[0];
+  if (!row) return reply.code(404).send({ error: 'No encontramos esa rutina en tu plan' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE routine
+       SET is_today = 0
+       WHERE athlete_id = $1
+         AND (plan_id = $2 OR ($2 IS NULL AND plan_id IS NULL))`,
+      [request.userId, row.plan_id],
+    );
+    await client.query('UPDATE routine SET is_today = 1 WHERE id = $1', [row.id]);
+    await client.query('COMMIT');
+    return reply.send({ ok: true, routineId: row.id });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error }, 'Routine selection failed');
+    return reply.code(500).send({ error: 'No pudimos seleccionar la rutina' });
   } finally {
     client.release();
   }

@@ -1,24 +1,58 @@
+import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
+import { deleteCurrentRoutine } from '@/api/client';
 import { Avatar } from '@/components/Avatar';
 import { Card } from '@/components/Card';
+import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
-import { getAthlete, getCoach, getSettings } from '@/db/queries';
+import { getAthlete, getCoach, getSettings, getTodayRoutine } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { num } from '@/lib/format';
 import { useApp } from '@/state/AppState';
+import { useRefreshRemoteData } from '@/state/RemoteState';
 import { color, radius } from '@/theme/tokens';
 
 /** 06 · Perfil del alumno */
 export default function AthleteProfile() {
+  const { getToken } = useAuth();
   const { unit, draft, switchRole, signOut } = useApp();
+  const refreshRemoteData = useRefreshRemoteData();
   const athlete = useQuery(getAthlete);
   const coach = useQuery(getCoach);
   const settings = useQuery((db) => getSettings(db, 'athlete'));
+  const routine = useQuery(getTodayRoutine);
+  const [deletingRoutine, setDeletingRoutine] = useState(false);
+  const [routineError, setRoutineError] = useState('');
+
+  const removeRoutine = async () => {
+    setDeletingRoutine(true);
+    setRoutineError('');
+    try {
+      await deleteCurrentRoutine(getToken);
+      await refreshRemoteData();
+    } catch (error: unknown) {
+      setRoutineError(error instanceof Error ? error.message : 'No pudimos eliminar la rutina.');
+    } finally {
+      setDeletingRoutine(false);
+    }
+  };
+
+  const confirmRemoveRoutine = () => {
+    Alert.alert(
+      'Eliminar rutina',
+      'Se van a borrar todos los días y ejercicios de tu plan actual.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Eliminar', style: 'destructive', onPress: () => void removeRoutine() },
+      ],
+    );
+  };
 
   return (
     <Screen scroll gap={16}>
@@ -29,6 +63,39 @@ export default function AthleteProfile() {
           <Txt variant="meta">{athlete.goal}</Txt>
         </View>
       </View>
+
+      <Card tone="muted" padding={18} gap={12}>
+        <Txt variant="label" tone={color.lime}>
+          GESTIONAR RUTINA
+        </Txt>
+        <Txt variant="h5" numberOfLines={2}>
+          {routine.id ? routine.name.split(' · ')[0] : 'Sin rutina cargada'}
+        </Txt>
+        <Txt variant="body" tone={color.textMuted}>
+          {routine.id
+            ? 'Podés reemplazar tu plan o eliminarlo para volver a empezar.'
+            : 'Importá una rutina de entre 1 y 7 días para verla en Hoy.'}
+        </Txt>
+        <View style={styles.routineActions}>
+          <Button
+            label={routine.id ? 'Cambiar rutina' : 'Cargar rutina'}
+            variant={routine.id ? 'outline' : 'primary'}
+            size="sm"
+            fill
+            onPress={() => router.push('/importar/origen')}
+          />
+          {routine.id ? (
+            <Button
+              label={deletingRoutine ? 'Eliminando...' : 'Eliminar'}
+              variant="ghost"
+              size="sm"
+              onPress={confirmRemoveRoutine}
+              disabled={deletingRoutine}
+            />
+          ) : null}
+        </View>
+        {routineError ? <Txt variant="meta" tone={color.textSoft}>{routineError}</Txt> : null}
+      </Card>
 
       {!draft.soloTraining ? (
         <Card tone="violet" padding={18} style={styles.coach}>
@@ -129,6 +196,7 @@ const styles = StyleSheet.create({
   },
   grid: { gap: 9 },
   gridRow: { flexDirection: 'row', gap: 9 },
+  routineActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   settings: {
     backgroundColor: color.surface,
     borderWidth: 1,

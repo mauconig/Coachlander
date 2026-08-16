@@ -14,6 +14,7 @@ export type RemoteBootstrap = {
     weightKg: number | null;
     heightM: number | null;
     soloTraining: boolean;
+    isAdmin: boolean;
   };
   tables: Record<string, Record<string, unknown>[]>;
 };
@@ -123,8 +124,21 @@ export function parseRoutine(tokenProvider: TokenProvider, input: ParseRoutineIn
 }
 
 export function saveImportedRoutine(tokenProvider: TokenProvider, input: SaveImportedRoutineInput) {
-  return request<{ ok: true; routineIds: string[] }>(tokenProvider, '/v1/import/routines', {
+  return request<{ ok: true; planId: string; routineIds: string[] }>(tokenProvider, '/v1/import/routines', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export function deleteCurrentRoutine(tokenProvider: TokenProvider) {
+  return request<{ ok: true; deletedRoutines: number }>(tokenProvider, '/v1/routines/current', {
+    method: 'DELETE',
+  });
+}
+
+export function selectCurrentRoutine(tokenProvider: TokenProvider, routineId: string) {
+  return request<{ ok: true; routineId: string }>(tokenProvider, '/v1/routines/current/selection', {
+    method: 'PUT',
+    body: JSON.stringify({ routineId }),
   });
 }

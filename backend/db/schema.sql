@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS exercise (
 
 CREATE TABLE IF NOT EXISTS routine (
   id TEXT PRIMARY KEY,
+  plan_id TEXT,
   name TEXT NOT NULL,
   block TEXT NOT NULL,
   week INTEGER NOT NULL,
@@ -48,6 +49,12 @@ CREATE TABLE IF NOT EXISTS routine (
   seconds_per_set INTEGER NOT NULL,
   is_today INTEGER NOT NULL DEFAULT 0
 );
+
+ALTER TABLE routine
+  ADD COLUMN IF NOT EXISTS plan_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_routine_athlete_plan
+  ON routine (athlete_id, plan_id);
 
 CREATE TABLE IF NOT EXISTS routine_exercise (
   routine_id TEXT NOT NULL REFERENCES routine(id),

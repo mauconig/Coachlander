@@ -53,8 +53,8 @@ export default function AssignRoutine() {
     setError('');
     try {
       const dayNumbers = [...new Set(detected.map((exercise) => exercise.day))].sort((a, b) => a - b);
-      if (dayNumbers.length !== 4) {
-        setError('La rutina debe conservar sus cuatro días antes de guardarla.');
+      if (dayNumbers.length < 1 || dayNumbers.length > 7) {
+        setError('La rutina debe tener entre 1 y 7 días antes de guardarla.');
         setSaving(false);
         return;
       }
@@ -83,7 +83,7 @@ export default function AssignRoutine() {
     return (
       <AppLoadingScreen
         title="Guardando tu rutina"
-        detail="Estamos preparando tus cuatro días para que puedas entrenar."
+        detail="Estamos preparando tus días para que puedas entrenar."
       />
     );
   }
