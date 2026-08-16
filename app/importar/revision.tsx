@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { Fragment } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -18,7 +19,7 @@ import { color, radius } from '@/theme/tokens';
 /** 17 · Lo que detectó la IA — review before anything is saved. */
 export default function ImportReview() {
   const { unit } = useApp();
-  const { detected, sourceLabel, resolve, discard } = useImport();
+  const { detected, routineName, sourceLabel, resolve, discard } = useImport();
   const estimateMinutes = useQuery((db) => getMetaNumber(db, 'import_estimate_minutes'));
 
   const totalSets = detected.reduce((n, e) => n + e.sets, 0);
@@ -54,6 +55,9 @@ export default function ImportReview() {
           {`DETECTADO DE ${sourceLabel.toUpperCase()}`}
         </Txt>
         <Txt variant="h3">{`${detected.length} ejercicios · ${totalSets} series`}</Txt>
+        <Txt variant="body" tone={color.onVioletStrong}>
+          {routineName ? `${routineName} Â· ` : ''}Las cargas son orientativas y conviene confirmarlas antes de entrenar.
+        </Txt>
         <View style={styles.badges}>
           <View style={styles.badgeLime}>
             <Txt variant="labelTight" tone={color.ink}>
@@ -74,50 +78,58 @@ export default function ImportReview() {
       </Card>
 
       <View style={styles.list}>
-        {detected.map((item) =>
-          item.uncertain ? (
-            <Card key={item.id} active radius={radius.md} padding={16} gap={12}>
-              <View style={styles.questionRow}>
-                <Icon name="question" size={16} tone={color.lime} />
-                <View style={styles.questionText}>
-                  <Txt variant="rowTitle">{item.raw ?? item.name}</Txt>
-                  <Txt variant="meta" tone={color.lime}>
-                    {item.question}
-                  </Txt>
-                </View>
-              </View>
+        {detected.map((item, index) => (
+          <Fragment key={item.id}>
+            {index === 0 || item.day !== detected[index - 1]?.day ? (
+              <Txt variant="label" tone={color.lime} style={styles.dayLabel}>
+                {item.dayName ?? `DÍA ${item.day}`}
+              </Txt>
+            ) : null}
 
-              <View style={styles.options}>
-                {(item.options ?? []).map((option, i) => (
-                  <Pressable
-                    key={option}
-                    onPress={() => resolve(item.id, i as 0 | 1)}
-                    accessibilityRole="button"
-                    style={[styles.option, i === 0 ? styles.optionPrimary : styles.optionSecondary]}
-                  >
-                    <Txt variant="labelTight" tone={i === 0 ? color.ink : color.textMuted}>
-                      {option}
+            {item.uncertain ? (
+              <Card key={item.id} active radius={radius.md} padding={16} gap={12}>
+                <View style={styles.questionRow}>
+                  <Icon name="question" size={16} tone={color.lime} />
+                  <View style={styles.questionText}>
+                    <Txt variant="rowTitle">{item.raw ?? item.name}</Txt>
+                    <Txt variant="meta" tone={color.lime}>
+                      {item.question}
                     </Txt>
-                  </Pressable>
-                ))}
-              </View>
+                  </View>
+                </View>
 
-              <Pressable onPress={() => discard(item.id)} accessibilityRole="button">
-                <Txt variant="meta" tone={color.textFaint} center>
-                  Descartar esta línea
-                </Txt>
-              </Pressable>
-            </Card>
-          ) : (
-            <Row
-              key={item.id}
-              left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
-              title={item.name}
-              meta={`${item.sets} × ${item.reps} · ${weight(item.load, unit)} · ${item.rest} s`}
-              chevron
-            />
-          ),
-        )}
+                <View style={styles.options}>
+                  {(item.options ?? []).map((option, i) => (
+                    <Pressable
+                      key={option}
+                      onPress={() => resolve(item.id, i as 0 | 1)}
+                      accessibilityRole="button"
+                      style={[styles.option, i === 0 ? styles.optionPrimary : styles.optionSecondary]}
+                    >
+                      <Txt variant="labelTight" tone={i === 0 ? color.ink : color.textMuted}>
+                        {option}
+                      </Txt>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <Pressable onPress={() => discard(item.id)} accessibilityRole="button">
+                  <Txt variant="meta" tone={color.textFaint} center>
+                    Descartar esta línea
+                  </Txt>
+                </Pressable>
+              </Card>
+            ) : (
+              <Row
+                key={item.id}
+                left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
+                title={item.name}
+                meta={`${item.sets} × ${item.reps} · ${item.load === null ? 'carga a confirmar' : weight(item.load, unit)} · ${item.rest} s`}
+                chevron
+              />
+            )}
+          </Fragment>
+        ))}
       </View>
     </Screen>
   );
@@ -125,6 +137,7 @@ export default function ImportReview() {
 
 const styles = StyleSheet.create({
   badges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  dayLabel: { paddingTop: 10 },
   badgeLime: {
     backgroundColor: color.lime,
     borderRadius: radius.pill,

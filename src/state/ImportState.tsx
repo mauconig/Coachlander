@@ -16,6 +16,7 @@ type ImportState = {
   autoOverload: boolean;
   setPasted: (text: string) => void;
   detectFrom: (origin: ImportOrigin) => void;
+  setDetected: (lines: ImportedExercise[]) => void;
   resolve: (id: string, optionIndex: 0 | 1) => void;
   discard: (id: string) => void;
   setRoutineName: (name: string) => void;
@@ -68,6 +69,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       autoOverload,
       setPasted,
       detectFrom,
+      setDetected,
       resolve,
       discard: (id) => setDetected((list) => list.filter((item) => item.id !== id)),
       setRoutineName,

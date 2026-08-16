@@ -1,4 +1,5 @@
 import { API_BASE_URL } from '@/config/runtime';
+import type { ImportedRoutineDay } from '@/data/types';
 
 export type TokenProvider = () => Promise<string | null>;
 
@@ -23,6 +24,24 @@ export type SetLogInput = {
   setIndex: number;
   load: number | null;
   reps: number;
+};
+
+export type ParseRoutineInput = {
+  text: string;
+  weightKg: number | null;
+  heightM: number | null;
+};
+
+export type ParseRoutineResult = {
+  routineName: string;
+  days: ImportedRoutineDay[];
+  exercises: ImportedRoutineDay['exercises'];
+};
+
+export type SaveImportedRoutineInput = {
+  routineName: string;
+  days: ImportedRoutineDay[];
+  autoOverload: boolean;
 };
 
 class ApiError extends Error {
@@ -91,6 +110,20 @@ export function updateProfile(
 
 export function pushSetLog(tokenProvider: TokenProvider, input: SetLogInput) {
   return request<Record<string, unknown>>(tokenProvider, '/v1/set-logs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function parseRoutine(tokenProvider: TokenProvider, input: ParseRoutineInput) {
+  return request<ParseRoutineResult>(tokenProvider, '/v1/import/parse', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function saveImportedRoutine(tokenProvider: TokenProvider, input: SaveImportedRoutineInput) {
+  return request<{ ok: true; routineIds: string[] }>(tokenProvider, '/v1/import/routines', {
     method: 'POST',
     body: JSON.stringify(input),
   });

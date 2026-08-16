@@ -1,6 +1,10 @@
+import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
+import { saveImportedRoutine } from '@/api/client';
+import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Field } from '@/components/Field';
@@ -14,13 +18,17 @@ import { getClients } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { useApp } from '@/state/AppState';
 import { useImport } from '@/state/ImportState';
+import { useRefreshRemoteData } from '@/state/RemoteState';
 import { color } from '@/theme/tokens';
 
 /** 18 · Guardar y asignar — the last step of the import. */
 export default function AssignRoutine() {
+  const { getToken } = useAuth();
   const { role, unit } = useApp();
+  const refreshRemoteData = useRefreshRemoteData();
   const {
     routineName,
+    detected,
     setRoutineName,
     assignees,
     toggleAssignee,
@@ -32,12 +40,53 @@ export default function AssignRoutine() {
   const clients = useQuery(getClients);
   const isCoach = role === 'coach';
   const count = assignees.length;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-  const publish = () => {
-    reset();
-    router.dismissAll();
-    router.replace(isCoach ? '/rutinas' : '/hoy');
+  const publish = async () => {
+    if (!detected.length) {
+      setError('No hay ejercicios para guardar. Volvé a revisar la rutina.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    try {
+      const dayNumbers = [...new Set(detected.map((exercise) => exercise.day))].sort((a, b) => a - b);
+      if (dayNumbers.length !== 4) {
+        setError('La rutina debe conservar sus cuatro días antes de guardarla.');
+        setSaving(false);
+        return;
+      }
+      const days = dayNumbers.map((day) => {
+        const exercises = detected.filter((exercise) => exercise.day === day);
+        return {
+          day,
+          name: exercises[0]?.dayName ?? `Día ${day}`,
+          exercises,
+        };
+      });
+
+      await saveImportedRoutine(getToken, { routineName, days, autoOverload });
+      await refreshRemoteData();
+      reset();
+      router.dismissAll();
+      router.replace(isCoach ? '/rutinas' : '/hoy');
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : 'No pudimos guardar la rutina.');
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (saving) {
+    return (
+      <AppLoadingScreen
+        title="Guardando tu rutina"
+        detail="Estamos preparando tus cuatro días para que puedas entrenar."
+      />
+    );
+  }
 
   return (
     <Screen scroll gap={15}>
@@ -81,6 +130,8 @@ export default function AssignRoutine() {
           <Toggle value={autoOverload} onChange={setAutoOverload} label="Overload automático" />
         }
       />
+
+      {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}
 
       <View style={styles.actions}>
         <Button

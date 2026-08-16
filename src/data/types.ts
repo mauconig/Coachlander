@@ -81,12 +81,20 @@ export type ImportedExercise = {
   id: string;
   name: string;
   sets: number;
-  reps: number;
+  reps: string;
   load: number | null;
   rest: number;
+  day: number;
+  dayName?: string;
   /** true when the AI could not disambiguate the line */
   uncertain?: boolean;
   raw?: string;
   question?: string;
   options?: [string, string];
+};
+
+export type ImportedRoutineDay = {
+  day: number;
+  name: string;
+  exercises: ImportedExercise[];
 };

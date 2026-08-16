@@ -1,13 +1,17 @@
 import * as Clipboard from 'expo-clipboard';
+import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { parseRoutine } from '@/api/client';
+import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { TopBar } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
-import { getMeta } from '@/db/queries';
+import { getAthlete, getMeta } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { useImport } from '@/state/ImportState';
 import { font } from '@/theme/type';
@@ -15,18 +19,52 @@ import { color, radius } from '@/theme/tokens';
 
 /** 16 · Pegar texto — free-form input the parser will read. */
 export default function PasteRoutine() {
-  const { pasted, setPasted, detectFrom } = useImport();
+  const { getToken } = useAuth();
+  const { pasted, setPasted, detectFrom, setDetected, setRoutineName } = useImport();
   const sampleText = useQuery((db) => getMeta(db, 'import_sample_text'));
+  const athlete = useQuery(getAthlete);
+  const [parsing, setParsing] = useState(false);
+  const [error, setError] = useState('');
 
   const paste = async () => {
     const text = await Clipboard.getStringAsync();
     setPasted(text || sampleText);
   };
 
-  const detect = () => {
-    detectFrom('text');
-    router.push('/importar/revision');
+  const detect = async () => {
+    const text = pasted.trim();
+    if (!text) {
+      setError('Pegá una rutina antes de interpretarla.');
+      return;
+    }
+
+    setError('');
+    setParsing(true);
+    try {
+      const result = await parseRoutine(getToken, {
+        text,
+        weightKg: athlete.weightKg || null,
+        heightM: athlete.heightM || null,
+      });
+      detectFrom('text');
+      setDetected(result.exercises);
+      setRoutineName(result.routineName);
+      router.push('/importar/revision');
+    } catch (parseError: unknown) {
+      setError(parseError instanceof Error ? parseError.message : 'No pudimos interpretar la rutina.');
+    } finally {
+      setParsing(false);
+    }
   };
+
+  if (parsing) {
+    return (
+      <AppLoadingScreen
+        title="Interpretando tu rutina"
+        detail="Estamos separando tus cuatro días y estimando cargas iniciales."
+      />
+    );
+  }
 
   return (
     <Screen padded={false} bottomInset={false}>
@@ -78,10 +116,13 @@ export default function PasteRoutine() {
             </Txt>
           </View>
 
+          {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}
+
           <Button
             label="Detectar rutina"
             icon={<Icon name="file" size={16} tone={color.ink} />}
             onPress={detect}
+            disabled={parsing}
             style={styles.cta}
           />
         </View>

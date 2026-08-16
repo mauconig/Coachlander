@@ -113,7 +113,11 @@ export function getExercise(data: RemoteData, id: string): Exercise | null {
 }
 
 export function getTodayRoutine(data: RemoteData): Routine {
-  const routineRow = rows(data, 'routine').find((row) => booleanValue(row, 'is_today')) ?? first(data, 'routine');
+  const routineRows =
+    data.user?.role === 'athlete'
+      ? rows(data, 'routine').filter((row) => row.athlete_id === data.user?.id)
+      : rows(data, 'routine');
+  const routineRow = routineRows.find((row) => booleanValue(row, 'is_today')) ?? routineRows[0];
   const routineId = stringValue(routineRow, 'id');
   const coachId = stringValue(routineRow, 'coach_id');
   const exerciseRows = rows(data, 'routine_exercise')
@@ -275,9 +279,10 @@ export function getImportLines(data: RemoteData): ImportedExercise[] {
       id: stringValue(row, 'id'),
       name: stringValue(row, 'name'),
       sets: numberValue(row, 'sets'),
-      reps: numberValue(row, 'reps'),
+      reps: String(numberValue(row, 'reps')),
       load: nullableNumber(row, 'load'),
       rest: numberValue(row, 'rest'),
+      day: numberValue(row, 'day', 1),
       uncertain: booleanValue(row, 'uncertain'),
       raw: row.raw === null || row.raw === undefined ? undefined : stringValue(row, 'raw'),
       question: row.question === null || row.question === undefined ? undefined : stringValue(row, 'question'),

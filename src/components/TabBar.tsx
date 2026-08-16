@@ -1,10 +1,13 @@
 import { Tabs } from 'expo-router';
+import { router } from 'expo-router';
+import { Fragment } from 'react';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from './Icon';
 import { Txt } from './Txt';
+import { useApp } from '@/state/AppState';
 import { color } from '@/theme/tokens';
 
 /**
@@ -31,6 +34,8 @@ const ICONS: Record<string, IconName> = {
  */
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
+  const { draft } = useApp();
+  const canLoadRoutine = draft.role === 'athlete' && draft.soloTraining;
 
   return (
     <View style={[styles.bar, { paddingBottom: insets.bottom + 14 }]}>
@@ -49,19 +54,31 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
         };
 
         return (
-          <Pressable
-            key={route.key}
-            onPress={onPress}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: focused }}
-            accessibilityLabel={options.title}
-            style={styles.item}
-          >
-            <Icon name={icon} size={20} tone={focused ? color.lime : color.border} />
-            <Txt variant="labelSm" tone={tone} style={styles.label}>
-              {label}
-            </Txt>
-          </Pressable>
+          <Fragment key={route.key}>
+            {canLoadRoutine && index === 2 ? (
+              <Pressable
+                onPress={() => router.push('/importar/origen')}
+                accessibilityRole="button"
+                accessibilityLabel="Cargar rutina"
+                style={styles.loadButton}
+              >
+                <Icon name="plus" size={26} tone={color.ink} weight={2.4} />
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              onPress={onPress}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: focused }}
+              accessibilityLabel={options.title}
+              style={styles.item}
+            >
+              <Icon name={icon} size={20} tone={focused ? color.lime : color.border} />
+              <Txt variant="labelSm" tone={tone} style={styles.label}>
+                {label}
+              </Txt>
+            </Pressable>
+          </Fragment>
         );
       })}
     </View>
@@ -79,5 +96,16 @@ const styles = StyleSheet.create({
     backgroundColor: color.screen,
   },
   item: { alignItems: 'center', gap: 6, minWidth: 56 },
+  loadButton: {
+    width: 54,
+    height: 54,
+    marginTop: -30,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: color.lime,
+    borderWidth: 4,
+    borderColor: color.screen,
+  },
   label: { letterSpacing: 0.9 },
 });
