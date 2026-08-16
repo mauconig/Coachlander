@@ -1,18 +1,13 @@
 import { useSignIn, useSignUp } from '@clerk/expo';
 import { useSSO } from '@clerk/expo/experimental';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
-  findNodeHandle,
   Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
   StyleSheet,
-  TextInput,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { resetEphemeralTestAccount } from '@/api/client';
@@ -52,54 +47,9 @@ export default function CreateAccount() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [socialBusy, setSocialBusy] = useState<'google' | 'apple' | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
-  const scrollOffsetRef = useRef(0);
   const { signUp, errors: signUpErrors, fetchStatus: signUpStatus } = useSignUp();
   const { signIn, errors: signInErrors, fetchStatus: signInStatus } = useSignIn();
   const { startSSOFlow } = useSSO();
-
-  const bringInputIntoView = (input: TextInput) => {
-    const node = findNodeHandle(input);
-    if (node == null) return;
-
-    const scrollToInput = () => {
-      scrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(node, 36, true);
-      const keyboardTop = Keyboard.metrics()?.screenY;
-      if (keyboardTop == null) return;
-
-      input.measureInWindow((_x, y, _width, height) => {
-        const overflow = y + height - keyboardTop + 24;
-        if (overflow > 0) {
-          scrollRef.current?.scrollTo({
-            y: scrollOffsetRef.current + overflow,
-            animated: true,
-          });
-        }
-      });
-    };
-
-    const keyboardSubscription = Keyboard.addListener('keyboardDidShow', () => {
-      scrollToInput();
-      keyboardSubscription.remove();
-    });
-    setTimeout(() => {
-      keyboardSubscription.remove();
-      scrollToInput();
-    }, 800);
-  };
-
-  const bringPasswordIntoView = (_input: TextInput) => {
-    const passwordScrollOffset = 280;
-    const scrollToPassword = () => {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({ y: passwordScrollOffset, animated: true });
-      });
-    };
-
-    scrollToPassword();
-    setTimeout(scrollToPassword, 250);
-    setTimeout(scrollToPassword, 800);
-  };
 
   const busy = submitting || socialBusy !== null || signUpStatus === 'fetching' || signInStatus === 'fetching';
 
@@ -251,22 +201,15 @@ export default function CreateAccount() {
 
   return (
     <Screen>
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'position'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      <KeyboardAwareScrollView
+        enableOnAndroid
+        enableAutomaticScroll
+        extraHeight={0}
+        extraScrollHeight={64}
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={styles.body}
-          keyboardShouldPersistTaps="handled"
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-          onScroll={(event) => {
-            scrollOffsetRef.current = event.nativeEvent.contentOffset.y;
-          }}
-          scrollEventThrottle={16}
-          showsVerticalScrollIndicator={false}
-        >
           <BackButton />
 
           <View style={styles.brandBlock}>
@@ -295,7 +238,6 @@ export default function CreateAccount() {
                 onChangeText={(name) => patchDraft({ name })}
                 placeholder="Nombre y apellido"
                 autoCapitalize="words"
-                onFocusInput={bringInputIntoView}
               />
             ) : null}
             {!needsVerification ? (
@@ -307,14 +249,12 @@ export default function CreateAccount() {
                   placeholder="tu@mail.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
-                  onFocusInput={bringInputIntoView}
                 />
                 <Field
                   label="CONTRASEÑA"
                   value={draft.password}
                   onChangeText={(password) => patchDraft({ password })}
                   secure
-                  onFocusInput={bringPasswordIntoView}
                   hint="Mínimo 8 caracteres"
                 />
               </>
@@ -327,7 +267,6 @@ export default function CreateAccount() {
                 keyboardType="number-pad"
                 autoCapitalize="none"
                 autoFocus
-                onFocusInput={bringPasswordIntoView}
               />
             )}
           </View>
@@ -377,14 +316,12 @@ export default function CreateAccount() {
               onPress={toggleMode}
             />
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
   body: { gap: 20, paddingBottom: 24, flexGrow: 1 },
   brandBlock: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 2 },
   logo: { width: 42, height: 42, borderRadius: 13 },

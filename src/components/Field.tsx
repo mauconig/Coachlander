@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -24,7 +24,6 @@ type Props = {
   /** unit suffix pinned to the right, e.g. "kg" */
   suffix?: string;
   autoFocus?: boolean;
-  onFocusInput?: (input: TextInput) => void;
   style?: ViewStyle;
 };
 
@@ -43,12 +42,10 @@ export function Field({
   secure,
   suffix,
   autoFocus,
-  onFocusInput,
   style,
 }: Props) {
   const [focused, setFocused] = useState(false);
   const [revealed, setRevealed] = useState(false);
-  const inputRef = useRef<TextInput>(null);
   const hot = focused;
 
   return (
@@ -59,7 +56,6 @@ export function Field({
 
       <View style={[styles.box, hot && styles.boxHot]}>
         <TextInput
-          ref={inputRef}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -71,7 +67,6 @@ export function Field({
           autoFocus={autoFocus}
           onFocus={() => {
             setFocused(true);
-            if (inputRef.current) onFocusInput?.(inputRef.current);
           }}
           onBlur={() => setFocused(false)}
           selectionColor={color.lime}
