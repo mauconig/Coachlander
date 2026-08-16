@@ -5,7 +5,7 @@ import { Row } from '@/components/Row';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
-import type { DayMark } from '@/data/mock';
+import type { DayMark } from '@/data/types';
 import { getHistory, getHistorySummary, getMonthGrid } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { dayBadge, grouped, hoursMinutes, monthName } from '@/lib/format';

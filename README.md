@@ -1,153 +1,73 @@
-# Tempo — Coachlander
+# Coachlander
 
-App de coaching fitness para entrenadores y alumnos en Latinoamérica. El entrenador carga la
-rutina; el alumno aprieta play y entrena con los tiempos y las cargas ya calculadas, serie por
-serie.
-
-React Native sobre Expo (SDK 56), iOS y Android. Interfaz en español, sin i18n: los textos viven
-donde se usan.
+App de coaching fitness para entrenadores y alumnos en Latinoamérica. React Native sobre Expo
+SDK 56, con Clerk para autenticación y PostgreSQL remoto como fuente única de verdad.
 
 ## Arrancar
 
 ```bash
 npm install
 npm run start          # luego i (iOS) o a (Android)
-npm run check          # tipos + SQL
+npm run check          # typecheck
+npm run android        # development build para el dispositivo
 ```
 
-### Development build (el camino principal)
+Hace falta USB debugging activado y aceptar el diálogo de depuración en el teléfono. La app usa
+un development build de Expo; Expo Go debe coincidir con el SDK 56 si se usa para una prueba rápida.
 
-```bash
-npm run android        # expo run:android — compila e instala en el dispositivo
-npm run db:pull        # baja tempo.db (+ sidecars WAL) al proyecto
-sqlite3 tempo.db "SELECT * FROM set_log ORDER BY logged_at DESC;"
-```
-
-La primera compilación es lenta: arma el código nativo desde cero para la ABI
-del dispositivo. Hace falta USB debugging activado y aceptar el diálogo
-«¿Permitir depuración por USB?» en el teléfono.
-
-`npm run db:shell` abre un `sqlite3` directamente en el dispositivo, si la
-imagen lo trae.
-
-### Expo Go
-
-**Expo Go soporta una sola versión de SDK por build.** El proyecto está en SDK
-56, así que necesita Expo Go 56.x — un Expo Go 54 o 57 lo rechaza con un error
-explícito, no es que "no anda". Por eso el SDK del proyecto está atado a la
-versión de Expo Go que usa el equipo.
-
-Además Expo Go no sirve para mirar la base: `adb run-as` sólo funciona sobre un
-APK debuggable, y Expo Go viene firmado como release. Para eso, development
-build.
-
-## Cómo está armado
+## Arquitectura
 
 ```
-app/                 rutas (expo-router, file-based)
-  (onboarding)/      bienvenida → crear-cuenta → rol → codigo → datos → listo
-  (athlete)/         tabs del alumno: hoy · progreso · historial · perfil
-  (coach)/           tabs del entrenador: alumnos · rutinas · mensajes · perfil
+app/                 rutas Expo Router
+  (onboarding)/      bienvenida → crear cuenta → rol → datos → listo
+  (athlete)/         hoy · progreso · historial · perfil
+  (coach)/           alumnos · rutinas · mensajes · perfil
   sesion.tsx         reproductor de sesión en vivo
   ejercicio/[id]     detalle de ejercicio
   rutina/[id]        editor de rutina
-  importar/          origen → pegar → revision → asignar
+  importar/          flujo de importación
 src/
-  theme/             tokens de color, radios y escala tipográfica
-  components/        primitivas compartidas (Screen, Card, Row, Button, Sheet…)
+  api/               cliente del API y bootstrap remoto
+  state/             sesión, snapshot remoto y flujo de importación
+  db/queries.ts      selectores puros sobre el snapshot remoto
+  components/        primitivas visuales compartidas
   session/           máquina de estados de la sesión en vivo
-  state/             contexto de cuenta/rol y del flujo de importación
-  db/                esquema SQLite, seed, consultas y hooks
-  data/              contenido semilla y tipos de dominio
-  lib/               formato es-AR (coma decimal, miles con espacio, fechas)
-scripts/             check-sql.mjs, pull-db.mjs
+  theme/             tokens visuales
+backend/
+  src/server.mjs     API Fastify autenticada con Clerk
+  db/schema.sql      esquema PostgreSQL
 ```
 
-Nada de estilos sueltos: todo color, radio y tamaño de texto sale de `src/theme`. Si algo necesita
-un valor nuevo, se agrega ahí y se mueve toda la app junta.
+La app no usa SQLite ni seeds locales. Al iniciar sesión, el API devuelve el perfil del usuario y
+las tablas remotas; React mantiene ese snapshot sólo en memoria para renderizarlo. Clerk conserva
+la sesión según su cache nativa. Los sets cerrados se escriben en PostgreSQL mediante
+`POST /v1/set-logs`.
 
-## Pantallas del diseño → rutas
+## Backend
 
-El diseño (`Tempo App.dc.html`) numera 18 pantallas en cuatro bloques.
-
-| #  | Pantalla                  | Ruta                        |
-|----|---------------------------|-----------------------------|
-| 01 | Hoy                       | `(athlete)/hoy`             |
-| 02 | Sesión en vivo            | `sesion`                    |
-| 03 | Detalle de ejercicio      | `ejercicio/[id]`            |
-| 04 | Progressive overload      | `(athlete)/progreso`        |
-| 05 | Historial de sesiones     | `(athlete)/historial`       |
-| 06 | Perfil del alumno         | `(athlete)/perfil`          |
-| 07 | Mis alumnos               | `(coach)/alumnos`           |
-| 08 | Editor de rutina          | `rutina/[id]`               |
-| 09 | Bienvenida                | `(onboarding)/bienvenida`   |
-| 10 | Crear cuenta con email    | `(onboarding)/crear-cuenta` |
-| 11 | ¿Alumno o entrenador?     | `(onboarding)/rol`          |
-| 12 | Código del entrenador     | `(onboarding)/codigo`       |
-| 13 | Tus datos                 | `(onboarding)/datos`        |
-| 14 | Todo listo                | `(onboarding)/listo`        |
-| 15 | De dónde viene la rutina  | `importar/origen`           |
-| 16 | Pegar texto               | `importar/pegar`            |
-| 17 | Lo que detectó la IA      | `importar/revision`         |
-| 18 | Guardar y asignar         | `importar/asignar`          |
-
-Tres rutas no están en el diseño pero las exige la tab bar del entrenador que sí lo está
-(pantalla 07): `(coach)/rutinas`, `(coach)/mensajes` y `(coach)/perfil`. Están construidas con
-las mismas primitivas y sirven de conexión entre el editor y el importador.
-
-## La sesión en vivo
-
-`src/session/useSession.ts` es el corazón funcional y replica la lógica del diseño:
-
-1. El cronómetro corre la fase de trabajo del ejercicio actual.
-2. Al cerrar una serie se abre la hoja de carga: sugerido del plan, un poco más (+2,5 kg) o
-   teclado numérico.
-3. Elegida la carga, arranca el descanso y al terminar vuelve solo a la siguiente serie.
-4. Cerrada la última serie, el ejercicio avanza al siguiente sin intervención.
-
-La pantalla mantiene el teléfono despierto mientras dura la sesión.
-
-## Datos
-
-Todavía no hay backend. Las pantallas leen de una base SQLite local (`expo-sqlite`) que se crea y
-se puebla en el primer arranque, desde `app/_layout.tsx`:
+El VPS expone el API en:
 
 ```
-src/db/schema.ts    tablas y SCHEMA_VERSION
-src/db/seed.ts      carga el contenido de src/data/mock.ts
-src/db/migrate.ts   corre en onInit; resembra si cambia la versión
-src/db/queries.ts   consultas tipadas que devuelven los tipos de dominio
-src/db/useQuery.ts  useQuery / useMutation
+https://coachlander.147-93-180-120.sslip.io
 ```
 
-`src/data/mock.ts` sigue siendo la única fuente de verdad de *qué* contiene la base —Nadia,
-Camila, la rutina Empuje A, los mismos nombres y cargas del diseño—, pero ya no lo leen las
-pantallas: lo lee el seed.
+El despliegue se realiza con Docker Compose desde `/opt/coachlander`. PostgreSQL se mantiene en el
+volumen Docker del VPS y el API ejecuta el esquema al arrancar. No hay datos demo automáticos:
+los perfiles, rutinas, ejercicios y logs deben provenir de operaciones reales de la aplicación.
 
-Las lecturas son síncronas y las pantallas no tienen estado de carga: el dataset es chico y local,
-y `SQLiteProvider` monta a sus hijos recién cuando la base está lista. Después de escribir,
-`useMutation` avisa y todas las consultas montadas se vuelven a correr.
+Health check:
+
+```bash
+curl https://coachlander.147-93-180-120.sslip.io/healthz
+```
+
+## Flujo de datos
 
 ```tsx
 const routine = useQuery(getTodayRoutine);
-const exercise = useQuery((db) => getExercise(db, id), [id]);
-const logSet = useMutation(insertSetLog);
+const exercise = useQuery((remote) => getExercise(remote, id), [id]);
 ```
 
-La tabla `set_log` es la única que no viene del seed: la escribe el reproductor cada vez que se
-cierra una serie, así que sobrevive a un reinicio y aparece bajo Progreso. Perfil tiene
-«Restablecer datos de ejemplo» para volver al estado inicial.
-
-Los puntos donde entraría la red están marcados en el código (selector de archivos en
-`importar/origen`, detección de rutina en `importar/pegar`, video demo en `sesion` y
-`ejercicio/[id]`, publicación de rutina en `rutina/[id]`).
-
-### Esquema
-
-`coach`, `athlete`, `exercise`, `routine`, `routine_exercise`, `client`, `session`,
-`overload_row`, `weekly_volume`, `month_day`, `setting`, `template`, `thread`, `import_line`,
-`set_log`, `app_meta`.
-
-`npm run check:sql` aplica el esquema a una base en memoria y prepara todas las sentencias de
-`src/db` contra ella. Vale la pena correrlo: ni el bundler ni `tsc` ven un error de SQL — eso sólo
-aparece en el dispositivo.
+Cuando PostgreSQL no tiene una rutina, las pantallas muestran estados vacíos en vez de cargar
+contenido de ejemplo. El dashboard sin rutina es una vista válida para usuarios que entrenan por
+su cuenta.

@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/expo';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
@@ -5,6 +6,7 @@ import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
+import { pushSetLog } from '@/api/client';
 import { Card } from '@/components/Card';
 import { Icon } from '@/components/Icon';
 import { ProgressBar } from '@/components/Progress';
@@ -12,10 +14,11 @@ import { Row, RowIndex } from '@/components/Row';
 import { Screen } from '@/components/Screen';
 import { Sheet } from '@/components/Sheet';
 import { Txt } from '@/components/Txt';
-import { getTodayRoutine, insertSetLog } from '@/db/queries';
-import { useMutation, useQuery } from '@/db/useQuery';
+import { getTodayRoutine } from '@/db/queries';
+import { useQuery } from '@/db/useQuery';
 import { useSession } from '@/session/useSession';
 import { useApp } from '@/state/AppState';
+import { useRefreshRemoteData } from '@/state/RemoteState';
 import { font } from '@/theme/type';
 import { GUTTER, color, hitSlop, radius } from '@/theme/tokens';
 
@@ -33,16 +36,22 @@ const KEY_ROWS = [
 export default function LiveSession() {
   useKeepAwake();
   const { unit } = useApp();
+  const { getToken } = useAuth();
+  const refreshRemoteData = useRefreshRemoteData();
   const insets = useSafeAreaInsets();
   const routine = useQuery(getTodayRoutine);
-  const logSet = useMutation(insertSetLog);
 
   const session = useSession(routine.exercises, {
     unit,
     estimatedMinutes: routine.estimatedMinutes,
-    // Every closed set lands in the database, so the log survives a restart
-    // and shows up under Progreso.
-    onSetLogged: (entry) => logSet({ routineId: routine.id, ...entry }),
+    onSetLogged: (entry) => {
+      const payload = { routineId: routine.id, ...entry };
+      void pushSetLog(getToken, payload)
+        .then(() => refreshRemoteData())
+        .catch((error: unknown) => {
+          console.warn('[Coachlander] No se pudo sincronizar la serie', error);
+        });
+    },
   });
 
   const onCta = () => {

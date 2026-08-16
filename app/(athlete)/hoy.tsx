@@ -18,17 +18,41 @@ import { color } from '@/theme/tokens';
 
 /** 01 · Hoy — the athlete's home: what to train, and the play button. */
 export default function Today() {
-  const { unit } = useApp();
+  const { unit, draft } = useApp();
   const athlete = useQuery(getAthlete);
   const routine = useQuery(getTodayRoutine);
   const totalSets = useQuery(getRoutineSetCount);
+
+  if (draft.soloTraining || !routine.id) {
+    return (
+      <Screen scroll gap={18}>
+        <View style={styles.header}>
+          <View style={styles.greeting}>
+            <Txt variant="eyebrow">{longDate(new Date()).toUpperCase()}</Txt>
+            <Txt variant="h2">{athlete.firstName ? `Hola, ${athlete.firstName}` : 'Hola'}</Txt>
+          </View>
+          <Avatar name={athlete.name} size={44} />
+        </View>
+
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <Icon name="play" size={24} tone={color.ink} />
+          </View>
+          <Txt variant="h1">Tu dashboard está vacío</Txt>
+          <Txt variant="bodyLg" tone={color.textMuted} center>
+            Cuando tengas una rutina disponible, va a aparecer acá.
+          </Txt>
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen scroll gap={18}>
       <View style={styles.header}>
         <View style={styles.greeting}>
           <Txt variant="eyebrow">{longDate(new Date()).toUpperCase()}</Txt>
-          <Txt variant="h2">{`Hola, ${athlete.firstName}`}</Txt>
+            <Txt variant="h2">{athlete.firstName ? `Hola, ${athlete.firstName}` : 'Hola'}</Txt>
         </View>
         <Avatar name={athlete.name} size={44} />
       </View>
@@ -41,9 +65,11 @@ export default function Today() {
             </Txt>
           </View>
           {/* The pill keeps its full label; the byline yields space first. */}
-          <Txt variant="label" tone={color.onViolet} numberOfLines={1} style={styles.byline}>
-            {`POR ${routine.coach.toUpperCase()}`}
-          </Txt>
+          {!draft.soloTraining && routine.coach ? (
+            <Txt variant="label" tone={color.onViolet} numberOfLines={1} style={styles.byline}>
+              {`POR ${routine.coach.toUpperCase()}`}
+            </Txt>
+          ) : null}
         </View>
 
         <Txt variant="h1" style={styles.routineTitle}>
@@ -100,4 +126,21 @@ const styles = StyleSheet.create({
   stats: { flexDirection: 'row', gap: 22 },
   play: { alignSelf: 'flex-start', paddingHorizontal: 22 },
   list: { gap: 9 },
+  emptyState: {
+    flex: 1,
+    minHeight: 440,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    paddingHorizontal: 24,
+  },
+  emptyIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    backgroundColor: color.lime,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
 });

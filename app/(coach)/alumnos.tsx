@@ -13,19 +13,19 @@ import { getClients, getMetaNumber } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { color, radius } from '@/theme/tokens';
 
-const FILTERS = ['HOY (6)', 'ATRASADOS (2)', 'TODOS'] as const;
+const FILTERS = ['HOY', 'ATRASADOS', 'TODOS'] as const;
 type Filter = (typeof FILTERS)[number];
 
 /** 07 · Mis alumnos — who is training right now and who needs a nudge. */
 export default function Clients() {
-  const [filter, setFilter] = useState<Filter>('HOY (6)');
+  const [filter, setFilter] = useState<Filter>('HOY');
   const clients = useQuery(getClients);
   const clientCount = useQuery((db) => getMetaNumber(db, 'client_count'));
 
   const live = clients.find((c) => c.live);
   const rest = clients
     .filter((c) => !c.live)
-    .filter((c) => (filter === 'ATRASADOS (2)' ? c.attention : true));
+    .filter((c) => (filter === 'ATRASADOS' ? c.attention : true));
 
   return (
     <Screen scroll gap={16}>

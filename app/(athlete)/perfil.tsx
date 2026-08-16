@@ -7,20 +7,18 @@ import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
-import { resetToSeed } from '@/db/migrate';
 import { getAthlete, getCoach, getSettings } from '@/db/queries';
-import { useMutation, useQuery } from '@/db/useQuery';
+import { useQuery } from '@/db/useQuery';
 import { num } from '@/lib/format';
 import { useApp } from '@/state/AppState';
 import { color, radius } from '@/theme/tokens';
 
 /** 06 · Perfil del alumno */
 export default function AthleteProfile() {
-  const { unit, switchRole, signOut } = useApp();
+  const { unit, draft, switchRole, signOut } = useApp();
   const athlete = useQuery(getAthlete);
   const coach = useQuery(getCoach);
   const settings = useQuery((db) => getSettings(db, 'athlete'));
-  const resetDatabase = useMutation(resetToSeed);
 
   return (
     <Screen scroll gap={16}>
@@ -32,20 +30,22 @@ export default function AthleteProfile() {
         </View>
       </View>
 
-      <Card tone="violet" padding={18} style={styles.coach}>
-        <Avatar name={coach.name} size={46} tone="lime" />
-        <View style={styles.coachText}>
-          <Txt variant="label" tone={color.onViolet}>
-            TU ENTRENADORA
-          </Txt>
-          <Txt variant="h5">{coach.name}</Txt>
-        </View>
-        <Pressable style={styles.write} accessibilityRole="button">
-          <Txt variant="labelTight" tone={color.text}>
-            ESCRIBIR
-          </Txt>
-        </Pressable>
-      </Card>
+      {!draft.soloTraining ? (
+        <Card tone="violet" padding={18} style={styles.coach}>
+          <Avatar name={coach.name} size={46} tone="lime" />
+          <View style={styles.coachText}>
+            <Txt variant="label" tone={color.onViolet}>
+              TU ENTRENADORA
+            </Txt>
+            <Txt variant="h5">{coach.name}</Txt>
+          </View>
+          <Pressable style={styles.write} accessibilityRole="button">
+            <Txt variant="labelTight" tone={color.text}>
+              ESCRIBIR
+            </Txt>
+          </Pressable>
+        </Card>
+      ) : null}
 
       <View style={styles.grid}>
         <View style={styles.gridRow}>
@@ -109,11 +109,6 @@ export default function AthleteProfile() {
         >
           <Txt variant="body" tone={color.textFaint} center>
             Cerrar sesión
-          </Txt>
-        </Pressable>
-        <Pressable onPress={resetDatabase} accessibilityRole="button">
-          <Txt variant="body" tone={color.textFaint} center>
-            Restablecer datos de ejemplo
           </Txt>
         </Pressable>
       </View>

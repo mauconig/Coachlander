@@ -24,6 +24,10 @@ export default function ProfileSetup() {
   const coach = useQuery(getCoach);
   const connected = !draft.soloTraining && !!draft.coachName;
 
+  const finish = () => {
+    router.push('/listo');
+  };
+
   return (
     <Screen scroll gap={20}>
       <View style={styles.stepper}>
@@ -33,7 +37,13 @@ export default function ProfileSetup() {
 
       <Heading
         title={connected ? `Contale a ${coach.firstName} de vos` : 'Contanos de vos'}
-        subtitle={connected ? 'Con esto arma tu primera semana.' : 'Con esto armamos tu primera semana.'}
+        subtitle={
+          connected
+            ? 'Con esto arma tu primera semana.'
+            : draft.soloTraining
+              ? 'Tu espacio queda listo para cuando quieras empezar.'
+              : 'Con esto armamos tu primera semana.'
+        }
       />
 
       <View style={styles.group}>
@@ -93,8 +103,14 @@ export default function ProfileSetup() {
       </View>
 
       <Button
-        label={connected ? `Listo, mandar a ${coach.firstName}` : 'Listo, armar mi semana'}
-        onPress={() => router.push('/listo')}
+        label={
+          connected
+            ? `Listo, mandar a ${coach.firstName}`
+            : draft.soloTraining
+              ? 'Continuar'
+              : 'Listo, armar mi semana'
+        }
+        onPress={finish}
         style={styles.cta}
       />
     </Screen>

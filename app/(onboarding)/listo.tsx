@@ -23,6 +23,7 @@ export default function Ready() {
   const routine = useQuery(getTodayRoutine);
   const totalSets = useQuery(getRoutineSetCount);
   const isCoach = draft.role === 'coach';
+  const soloTraining = draft.soloTraining;
 
   const start = () => {
     finishOnboarding();
@@ -36,15 +37,19 @@ export default function Ready() {
       </View>
 
       <View style={styles.copy}>
-        <Txt variant="hero">{isCoach ? 'Tu cuenta está lista' : 'Tu plan está cargado'}</Txt>
+        <Txt variant="hero">
+          {isCoach ? 'Tu cuenta está lista' : soloTraining ? 'Bienvenido a tu primer set' : 'Tu plan está cargado'}
+        </Txt>
         <Txt variant="bodyLg">
           {isCoach
             ? 'Agregá a tu primer alumno o importá una rutina que ya tengas armada.'
-            : `${coach.firstName} armó tu semana 1. Empezás con ${routine.name}: ${routine.exercises.length} ejercicios, ${totalSets} series, ${routine.estimatedMinutes} minutos estimados.`}
+            : soloTraining
+              ? 'Tu dashboard está listo. Cuando tengas una rutina, va a aparecer acá.'
+              : `${coach.firstName} armó tu semana 1. Empezás con ${routine.name}: ${routine.exercises.length} ejercicios, ${totalSets} series, ${routine.estimatedMinutes} minutos estimados.`}
         </Txt>
       </View>
 
-      {!isCoach ? (
+      {!isCoach && !soloTraining ? (
         <View style={styles.promises}>
           {PROMISES.map((line) => (
             <View key={line} style={styles.promise}>
@@ -56,9 +61,9 @@ export default function Ready() {
       ) : null}
 
       <Button
-        label={isCoach ? 'Ver mis alumnos' : 'Ver mi primera sesión'}
+        label={isCoach ? 'Ver mis alumnos' : soloTraining ? 'Ir a mi dashboard' : 'Ver mi primera sesión'}
         variant="violet"
-        icon={!isCoach ? <Icon name="play" size={16} tone={color.text} /> : undefined}
+        icon={!isCoach && !soloTraining ? <Icon name="play" size={16} tone={color.text} /> : undefined}
         onPress={start}
       />
     </Screen>

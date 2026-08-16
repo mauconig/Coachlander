@@ -24,7 +24,7 @@ export default function CoachCode() {
   const coach = useQuery(getCoach);
   const input = useRef<TextInput>(null);
   const code = draft.coachCode;
-  const found = code.length === LENGTH;
+  const found = code.length === LENGTH && code === coach.code;
 
   const onChange = (raw: string) => {
     patchDraft({ coachCode: raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, LENGTH) });

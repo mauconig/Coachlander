@@ -7,9 +7,8 @@ import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
-import { resetToSeed } from '@/db/migrate';
-import { getCoach, getMetaNumber, getSettings } from '@/db/queries';
-import { useMutation, useQuery } from '@/db/useQuery';
+import { getClients, getCoach, getMetaNumber, getSettings } from '@/db/queries';
+import { useQuery } from '@/db/useQuery';
 import { useApp } from '@/state/AppState';
 import { color, radius } from '@/theme/tokens';
 
@@ -22,7 +21,7 @@ export default function CoachProfile() {
   const coach = useQuery(getCoach);
   const settings = useQuery((db) => getSettings(db, 'coach'));
   const clientCount = useQuery((db) => getMetaNumber(db, 'client_count'));
-  const resetDatabase = useMutation(resetToSeed);
+  const liveCount = useQuery((db) => getClients(db).filter((client) => client.live).length);
 
   return (
     <Screen scroll gap={16}>
@@ -48,7 +47,7 @@ export default function CoachProfile() {
 
       <View style={styles.grid}>
         <StatTile value={String(clientCount)} label="ALUMNOS" valueTone={color.lime} />
-        <StatTile value="6" label="ENTRENANDO HOY" />
+        <StatTile value={String(liveCount)} label="ENTRENANDO HOY" />
       </View>
 
       <View style={styles.settings}>
@@ -92,11 +91,6 @@ export default function CoachProfile() {
         >
           <Txt variant="body" tone={color.textFaint} center>
             Cerrar sesión
-          </Txt>
-        </Pressable>
-        <Pressable onPress={resetDatabase} accessibilityRole="button">
-          <Txt variant="body" tone={color.textFaint} center>
-            Restablecer datos de ejemplo
           </Txt>
         </Pressable>
       </View>

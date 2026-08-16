@@ -2,6 +2,8 @@ export type Role = 'athlete' | 'coach';
 
 export type Unit = 'kg' | 'lb';
 
+export type DayMark = 'done' | 'today' | 'rest' | 'planned';
+
 export type Exercise = {
   id: string;
   name: string;

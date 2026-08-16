@@ -1,3 +1,5 @@
+import { ClerkProvider } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
 import {
   Archivo_500Medium,
   Archivo_600SemiBold,
@@ -14,17 +16,20 @@ import {
 } from '@expo-google-fonts/space-grotesk';
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { migrate } from '@/db/migrate';
-import { DATABASE_NAME } from '@/db/schema';
 import { AppStateProvider } from '@/state/AppState';
 import { color } from '@/theme/tokens';
+
+const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
+
+if (!publishableKey) {
+  throw new Error("Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY. Add your key to .env.local.\nRun: 1) clerk auth login  2) clerk link  3) clerk env pull — then restart the dev server.");
+}
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -63,12 +68,10 @@ export default function RootLayout() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.screen }}>
-      <SafeAreaProvider>
-        <ThemeProvider value={navTheme}>
-          {/* Children mount only once the database is open and seeded, so
-              screens can read synchronously without loading states. */}
-          <SQLiteProvider databaseName={DATABASE_NAME} onInit={migrate}>
+    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.screen }}>
+        <SafeAreaProvider>
+          <ThemeProvider value={navTheme}>
             <AppStateProvider>
               <StatusBar style="light" />
               <Stack
@@ -81,9 +84,9 @@ export default function RootLayout() {
                 <Stack.Screen name="sesion" options={{ animation: 'slide_from_bottom' }} />
               </Stack>
             </AppStateProvider>
-          </SQLiteProvider>
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+          </ThemeProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ClerkProvider>
   );
 }

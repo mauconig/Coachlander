@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
+import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { Heading } from '@/components/Note';
@@ -30,7 +31,28 @@ const CHOICES: { role: Role; eyebrow: string; title: string; blurb: string }[] =
 
 /** 11 · ¿Alumno o entrenador? — step 1 of 3 */
 export default function RolePicker() {
-  const { draft, patchDraft } = useApp();
+  const { draft, patchDraft, remoteStatus, retryRemoteData } = useApp();
+
+  if (remoteStatus === 'error') {
+    return (
+      <AppLoadingScreen
+        error
+        title="No pudimos preparar tu cuenta"
+        detail="Revisá tu conexión e intentá de nuevo."
+        actionLabel="Reintentar"
+        onAction={() => void retryRemoteData()}
+      />
+    );
+  }
+
+  if (remoteStatus !== 'ready') {
+    return (
+      <AppLoadingScreen
+        title="Cargando tu cuenta"
+        detail="Estamos preparando las preguntas para configurar tu espacio."
+      />
+    );
+  }
 
   const next = () => router.push(draft.role === 'coach' ? '/datos' : '/codigo');
 
@@ -41,7 +63,7 @@ export default function RolePicker() {
         <StepProgress step={1} total={3} />
       </View>
 
-      <Heading title="¿Cómo vas a usar Tempo?" subtitle="Podés cambiarlo después desde tu perfil." />
+      <Heading title="¿Cómo vas a usar Coachlander?" subtitle="Podés cambiarlo después desde tu perfil." />
 
       <View style={styles.choices}>
         {CHOICES.map((choice) => {

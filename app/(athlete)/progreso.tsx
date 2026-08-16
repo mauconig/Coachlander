@@ -36,6 +36,23 @@ export default function Progress() {
   // Sets logged on this device during a live session.
   const logged = useQuery((db) => getRecentSetLogs(db, exerciseId, 4), [exerciseId]);
 
+  if (!exercise) {
+    return (
+      <Screen scroll gap={16}>
+        <View style={styles.heading}>
+          <Txt variant="eyebrow">PROGRESO</Txt>
+          <Txt variant="h2">Todavía no hay progreso</Txt>
+        </View>
+
+        <View style={styles.emptyState}>
+          <Txt variant="bodyLg" tone={color.textMuted} center>
+            Cuando tengas una rutina y registres tu primer set, tus avances van a aparecer acá.
+          </Txt>
+        </View>
+      </Screen>
+    );
+  }
+
   const peak = Math.max(...weeklyVolume, 1);
 
   return (
@@ -219,4 +236,10 @@ const styles = StyleSheet.create({
   bar: { flex: 1, borderRadius: 6, minHeight: 6 },
   chartAxis: { flexDirection: 'row', justifyContent: 'space-between' },
   logRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  emptyState: {
+    minHeight: 420,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
 });

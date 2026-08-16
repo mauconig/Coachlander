@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Tempo",
+    "name": "Coachlander",
     "slug": "coachlander",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,9 +19,8 @@
     "android": {
       "package": "com.coachlander.tempo",
       "adaptiveIcon": {
-        "backgroundColor": "#0A0A0C",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false
@@ -41,7 +40,9 @@
           "imageWidth": 160
         }
       ],
-      "expo-sqlite"
+      "expo-secure-store",
+      "expo-web-browser",
+      "@clerk/expo"
     ],
     "experiments": {
       "typedRoutes": true

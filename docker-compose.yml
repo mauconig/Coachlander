@@ -1,0 +1,43 @@
+services:
+  coachlander-db:
+    image: postgres:17-alpine
+    container_name: coachlander-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: coachlander
+      POSTGRES_USER: coachlander
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - coachlander_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coachlander -d coachlander"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - coachlander-internal
+
+  coachlander-api:
+    build:
+      context: ./backend
+    container_name: coachlander-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://coachlander:${POSTGRES_PASSWORD}@coachlander-db:5432/coachlander
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_PUBLISHABLE_KEY: ${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      PORT: 8782
+    ports:
+      - "127.0.0.1:8782:8782"
+    depends_on:
+      coachlander-db:
+        condition: service_healthy
+    networks:
+      - coachlander-internal
+
+volumes:
+  coachlander_pg:
+
+networks:
+  coachlander-internal:
+    driver: bridge
