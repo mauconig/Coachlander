@@ -593,6 +593,13 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   if (!templateId) return reply.code(400).send({ error: 'Falta la plantilla a asignar' });
   if (!clientIds.length) return reply.code(400).send({ error: 'Elegí al menos un alumno' });
 
+  const week = Number(request.body?.week);
+  const weekStart = textValue(request.body?.weekStart);
+  if (!Number.isInteger(week) || week < 1 || week > 5 || !weekStart) {
+    return reply.code(400).send({ error: 'Elegí una semana válida (1 a 5) para asignar' });
+  }
+  const replace = request.body?.replace === true;
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -622,7 +629,12 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
     }
 
     const results = [];
-    for (const athleteId of clientIds) {
+    for (const clientId of clientIds) {
+      const clientRow = await client.query('SELECT clerk_user_id FROM client WHERE id = $1', [clientId]);
+      const athleteId = clientRow.rows[0]?.clerk_user_id || clientId;
+      if (replace) {
+        await removeWeekRoutines(client, athleteId, weekStart);
+      }
       const planId = `plan-${randomUUID()}`;
       const routineIds = [];
       for (const [dayIndex, day] of days.entries()) {
@@ -631,13 +643,15 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
         const totalSets = day.exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
         await client.query(
           `INSERT INTO routine
-            (id, plan_id, name, block, week, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today)
-           VALUES ($1, $2, $3, $4, 1, $5, NULL, $6, $7, 45, $8)`,
+            (id, plan_id, name, block, week, week_start, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, 45, $10)`,
           [
             routineId,
             planId,
             `${templateRow.name} · ${day.name}`,
             'Plantilla',
+            week,
+            weekStart,
             day.day,
             athleteId,
             Math.max(10, Math.ceil(totalSets * 2.25 + day.exercises.length * 1.5)),
@@ -662,7 +676,7 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
               exercise.rest_seconds,
               day.name,
               note || 'Cargá la plantilla del entrenador y confirmá la técnica antes de comenzar.',
-              body.autoOverload === true ? 2.5 : null,
+              request.body?.autoOverload === true ? 2.5 : null,
             ],
           );
           await client.query(
@@ -672,19 +686,115 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
           );
         }
       }
-      results.push({ clientId: athleteId, planId, routineIds });
+      results.push({ clientId, planId, routineIds });
     }
 
     await client.query('COMMIT');
     return reply.code(201).send({ ok: true, results });
   } catch (error) {
     await client.query('ROLLBACK');
-    request.log.error({ error }, 'Template assign failed');
-    return reply.code(500).send({ error: 'No pudimos asignar la plantilla' });
+    request.log.error({ err: error }, 'Template assign failed');
+    return reply.code(500).send({ error: error?.message ?? 'No pudimos asignar la plantilla' });
   } finally {
     client.release();
   }
 });
+
+app.post('/v1/routines/:id/complete', { preHandler: authenticate }, async (request, reply) => {
+  const routineId = textValue(request.params?.id);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a completar' });
+
+  const result = await pool.query(
+    'UPDATE routine SET completed_at = NOW() WHERE id = $1 AND athlete_id = $2 RETURNING id, completed_at',
+    [routineId, request.userId],
+  );
+  if (!result.rows[0]) return reply.code(404).send({ error: 'No encontramos esa rutina' });
+  return reply.send({ ok: true, id: result.rows[0].id, completedAt: result.rows[0].completed_at });
+});
+
+app.post('/v1/session/start', { preHandler: authenticate }, async (request, reply) => {
+  const routineId = textValue(request.body?.routineId);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a iniciar' });
+
+  const routineResult = await pool.query(
+    'SELECT id, name FROM routine WHERE id = $1 AND athlete_id = $2',
+    [routineId, request.userId],
+  );
+  if (!routineResult.rows[0]) return reply.code(404).send({ error: 'No encontramos esa rutina' });
+
+  await pool.query(
+    `UPDATE client SET
+       live_routine = $1,
+       live_set_index = 0,
+       live_total_sets = NULL,
+       live_elapsed = '0:00'
+     WHERE clerk_user_id = $2`,
+    [routineResult.rows[0].name, request.userId],
+  );
+  return reply.send({ ok: true, routineId });
+});
+
+app.post('/v1/session/end', { preHandler: authenticate }, async (request, reply) => {
+  const routineId = textValue(request.body?.routineId);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a finalizar' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const updated = await client.query(
+      'UPDATE routine SET completed_at = NOW() WHERE id = $1 AND athlete_id = $2 RETURNING id',
+      [routineId, request.userId],
+    );
+    await client.query(
+      `UPDATE client SET
+         live_routine = NULL,
+         live_set_index = NULL,
+         live_total_sets = NULL,
+         live_elapsed = NULL,
+         status = 'Última sesión: hoy'
+       WHERE clerk_user_id = $1`,
+      [request.userId],
+    );
+    await client.query('COMMIT');
+    if (!updated.rows[0]) return reply.code(404).send({ error: 'No encontramos esa rutina' });
+    return reply.send({ ok: true, routineId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error }, 'Session end failed');
+    return reply.code(500).send({ error: 'No pudimos finalizar la sesión' });
+  } finally {
+    client.release();
+  }
+});
+
+async function removeWeekRoutines(client, athleteId, weekStart) {
+  const routines = await client.query(
+    'SELECT id FROM routine WHERE athlete_id = $1 AND week_start = $2',
+    [athleteId, weekStart],
+  );
+  const routineIds = routines.rows.map((row) => row.id);
+  if (!routineIds.length) return 0;
+
+  const exerciseLinks = await client.query(
+    'SELECT exercise_id FROM routine_exercise WHERE routine_id = ANY($1::text[])',
+    [routineIds],
+  );
+  const exerciseIds = [...new Set(exerciseLinks.rows.map((row) => row.exercise_id))];
+
+  await client.query('DELETE FROM routine_exercise WHERE routine_id = ANY($1::text[])', [routineIds]);
+  await client.query('DELETE FROM routine WHERE id = ANY($1::text[])', [routineIds]);
+
+  if (exerciseIds.length) {
+    await client.query(
+      `DELETE FROM exercise
+       WHERE id = ANY($1::text[])
+         AND NOT EXISTS (SELECT 1 FROM routine_exercise WHERE exercise_id = exercise.id)`,
+      [exerciseIds],
+    );
+  }
+
+  return routineIds.length;
+}
 
 async function removeAthleteRoutines(client, userId) {
   const routines = await client.query('SELECT id FROM routine WHERE athlete_id = $1', [userId]);

@@ -193,6 +193,7 @@ export function getClients(data: RemoteData): Client[] {
       id: stringValue(row, 'id'),
       name: stringValue(row, 'name'),
       status: stringValue(row, 'status'),
+      clerkUserId: stringValue(row, 'clerk_user_id') || undefined,
       attention: booleanValue(row, 'attention'),
       done: booleanValue(row, 'done'),
       live: stringValue(row, 'live_routine')
@@ -208,6 +209,107 @@ export function getClients(data: RemoteData): Client[] {
 
 export function getClient(data: RemoteData, id: string): Client | null {
   return getClients(data).find((client) => client.id === id) ?? null;
+}
+
+/** Semanas (week_start) en las que un alumno tiene rutinas, ordenadas. */
+export function getClientWeeks(data: RemoteData, athleteId: string): string[] {
+  const weeks = new Set<string>();
+  for (const row of rows(data, 'routine')) {
+    if (stringValue(row, 'athlete_id') === athleteId && stringValue(row, 'week_start')) {
+      weeks.add(stringValue(row, 'week_start'));
+    }
+  }
+  return [...weeks].sort();
+}
+
+export type ClientRoutineDay = {
+  id: string;
+  day: number;
+  name: string;
+  week: number;
+  weekStart: string;
+  completed: boolean;
+  exerciseCount: number;
+  totalSets: number;
+  estimatedMinutes: number;
+};
+
+export function getClientWeekRoutines(data: RemoteData, athleteId: string, weekStart: string): ClientRoutineDay[] {
+  return [...rows(data, 'routine')]
+    .filter((row) => stringValue(row, 'athlete_id') === athleteId && stringValue(row, 'week_start') === weekStart)
+    .sort((a, b) => numberValue(a, 'day') - numberValue(b, 'day'))
+    .map((row) => {
+      const routineId = stringValue(row, 'id');
+      const links = rows(data, 'routine_exercise').filter((link) => stringValue(link, 'routine_id') === routineId);
+      const totalSets = links.reduce((sum, link) => {
+        const exercise = rows(data, 'exercise').find((e) => stringValue(e, 'id') === stringValue(link, 'exercise_id'));
+        return sum + (exercise ? numberValue(exercise, 'sets') : 0);
+      }, 0);
+      return {
+        id: routineId,
+        day: numberValue(row, 'day'),
+        name: stringValue(row, 'name'),
+        week: numberValue(row, 'week'),
+        weekStart: stringValue(row, 'week_start'),
+        completed: booleanValue(row, 'completed_at'),
+        exerciseCount: links.length,
+        totalSets,
+        estimatedMinutes: numberValue(row, 'estimated_minutes'),
+      };
+    });
+}
+
+/** ¿El alumno tiene rutinas para la semana que arranca en `weekStart`? */
+export function hasPlanForWeek(data: RemoteData, athleteId: string, weekStart: string): boolean {
+  return rows(data, 'routine').some(
+    (row) =>
+      stringValue(row, 'athlete_id') === athleteId &&
+      String(stringValue(row, 'week_start')).slice(0, 10) === weekStart,
+  );
+}
+
+/** Lunes siguiente a hoy, en formato YYYY-MM-DD. */
+export function getNextWeekStart(now = new Date()): string {
+  const date = new Date(now);
+  const day = date.getDay();
+  const diff = day === 0 ? 1 : 8 - day;
+  date.setDate(date.getDate() + diff);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Lunes de la semana actual, en formato YYYY-MM-DD. */
+export function getCurrentWeekStart(now = new Date()): string {
+  const date = new Date(now);
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/** Número de semana (1-5) del mes para una fecha YYYY-MM-DD (cuenta los lunes del mes). */
+export function weekIndexOf(weekStart: string): number {
+  const [year, month, day] = weekStart.split('-').map(Number);
+  const target = new Date(year, month - 1, day);
+  const mondays: Date[] = [];
+  const daysInMonth = new Date(year, month, 0).getDate();
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month - 1, d);
+    if (date.getDay() === 1) mondays.push(date);
+  }
+  const index = mondays.findIndex((m) => m.getTime() === target.getTime());
+  return index >= 0 ? index + 1 : 1;
+}
+
+/** Última sesión completada del alumno (máximo routine.completed_at), o null. */
+export function getClientLastSession(data: RemoteData, athleteId: string): string | null {
+  let latest: string | null = null;
+  for (const row of rows(data, 'routine')) {
+    if (stringValue(row, 'athlete_id') !== athleteId) continue;
+    const completedAt = stringValue(row, 'completed_at');
+    if (!completedAt) continue;
+    if (!latest || completedAt > latest) latest = completedAt;
+  }
+  return latest;
 }
 
 export function getHistory(data: RemoteData): SessionRecord[] {

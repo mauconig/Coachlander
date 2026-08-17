@@ -2,11 +2,12 @@ import { useAuth } from '@clerk/expo';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
+import { useEffect, useRef } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/Button';
-import { pushSetLog } from '@/api/client';
+import { endSession, pushSetLog, startSession } from '@/api/client';
 import { Card } from '@/components/Card';
 import { Icon } from '@/components/Icon';
 import { ProgressBar } from '@/components/Progress';
@@ -54,9 +55,26 @@ export default function LiveSession() {
     },
   });
 
+  // Marca "entrenando ahora" en el cliente vinculado al abrir la sesión.
+  const sessionStarted = useRef(false);
+  useEffect(() => {
+    if (sessionStarted.current || !routine.id) return;
+    sessionStarted.current = true;
+    void startSession(getToken, routine.id).catch((error: unknown) => {
+      console.warn('[Coachlander] No se pudo marcar el inicio de sesión', error);
+    });
+  }, [getToken, routine.id]);
+
   const onCta = () => {
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (session.press() === 'finish') router.back();
+    if (session.press() === 'finish') {
+      void endSession(getToken, routine.id)
+        .then(() => refreshRemoteData())
+        .catch((error: unknown) => {
+          console.warn('[Coachlander] No se pudo marcar la sesión como completada', error);
+        });
+      router.back();
+    }
   };
 
   return (

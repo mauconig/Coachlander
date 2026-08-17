@@ -208,11 +208,33 @@ export function createTemplate(
 export function assignTemplate(
   tokenProvider: TokenProvider,
   templateId: string,
-  input: { clientIds: string[]; autoOverload: boolean },
+  input: { clientIds: string[]; autoOverload: boolean; week: number; weekStart: string; replace?: boolean },
 ) {
   return request<{ ok: true; results: { clientId: string; planId: string; routineIds: string[] }[] }>(
     tokenProvider,
     `/v1/templates/${templateId}/assign`,
     { method: 'POST', body: JSON.stringify(input) },
   );
+}
+
+export function completeRoutine(tokenProvider: TokenProvider, routineId: string) {
+  return request<{ ok: true; id: string; completedAt: string }>(
+    tokenProvider,
+    `/v1/routines/${routineId}/complete`,
+    { method: 'POST' },
+  );
+}
+
+export function startSession(tokenProvider: TokenProvider, routineId: string) {
+  return request<{ ok: true; routineId: string }>(tokenProvider, '/v1/session/start', {
+    method: 'POST',
+    body: JSON.stringify({ routineId }),
+  });
+}
+
+export function endSession(tokenProvider: TokenProvider, routineId: string) {
+  return request<{ ok: true; routineId: string }>(tokenProvider, '/v1/session/end', {
+    method: 'POST',
+    body: JSON.stringify({ routineId }),
+  });
 }

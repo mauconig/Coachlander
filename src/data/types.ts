@@ -46,6 +46,8 @@ export type Client = {
   id: string;
   name: string;
   status: string;
+  /** clerk user id of the linked account, when the client has one */
+  clerkUserId?: string;
   /** highlights the row when the client needs attention */
   attention?: boolean;
   done?: boolean;

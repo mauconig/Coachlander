@@ -1,12 +1,13 @@
 import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { assignTemplate, createTemplate } from '@/api/client';
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
+import { Chip } from '@/components/Chip';
 import { Field } from '@/components/Field';
 import { Heading } from '@/components/Note';
 import { Row } from '@/components/Row';
@@ -19,20 +20,54 @@ import { useQuery } from '@/db/useQuery';
 import { useApp } from '@/state/AppState';
 import { useCreator } from '@/state/CreatorState';
 import { useRefreshRemoteData } from '@/state/RemoteState';
-import { color } from '@/theme/tokens';
+import { color, radius } from '@/theme/tokens';
 
-/** 24 · Guardar y asignar — plantilla y/o alumnos. */
+const MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+
+/** Los lunes del mes actual: { week, weekStart (YYYY-MM-DD), label } */
+function monthWeeks(now: Date): { week: number; weekStart: string; label: string }[] {
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const mondays: Date[] = [];
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = new Date(year, month, day);
+    if (date.getDay() === 1) mondays.push(date);
+  }
+  if (!mondays.length) mondays.push(new Date(year, month, 1));
+
+  return mondays.map((date, i) => {
+    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return {
+      week: i + 1,
+      weekStart: iso,
+      label: `SEM ${i + 1} · ${String(date.getDate()).padStart(2, '0')} ${MONTHS[date.getMonth()]}`,
+    };
+  });
+}
+
+/** 24 · Guardar y asignar — plantilla y/o alumnos, eligiendo la semana. */
 export default function AssignCreatedRoutine() {
   const { getToken } = useAuth();
   const { unit } = useApp();
   const refreshRemoteData = useRefreshRemoteData();
-  const { routineName, setRoutineName, days, assignees, toggleAssignee, autoOverload, setAutoOverload, reset } =
+  const { routineName, setRoutineName, days, assignees, toggleAssignee, autoOverload, setAutoOverload, reset, preselectWeekStart } =
     useCreator();
 
   const clients = useQuery(getClients);
   const count = assignees.length;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const weeks = useMemo(() => monthWeeks(new Date()), []);
+  const currentWeek = weeks.find((w) => w.weekStart === new Date().toISOString().slice(0, 10));
+  const [selectedWeek, setSelectedWeek] = useState(currentWeek ?? weeks[0]);
+
+  useEffect(() => {
+    if (!preselectWeekStart) return;
+    const preset = weeks.find((w) => w.weekStart === preselectWeekStart.slice(0, 10));
+    if (preset) setSelectedWeek(preset);
+  }, [preselectWeekStart, weeks]);
 
   const publish = async (asTemplate: boolean) => {
     const nonEmptyDays = days
@@ -72,6 +107,9 @@ export default function AssignCreatedRoutine() {
         await assignTemplate(getToken, template.id, {
           clientIds: assignees,
           autoOverload,
+          week: selectedWeek.week,
+          weekStart: selectedWeek.weekStart,
+          replace: true,
         });
       }
       await refreshRemoteData();
@@ -100,7 +138,7 @@ export default function AssignCreatedRoutine() {
 
       <Heading
         title="Guardá tu rutina"
-        subtitle="Queda como plantilla en tu biblioteca y podés asignarla a tus alumnos."
+        subtitle="Queda como plantilla en tu biblioteca y elegí la semana para tus alumnos."
         variant="h2"
       />
 
@@ -110,6 +148,25 @@ export default function AssignCreatedRoutine() {
         onChangeText={setRoutineName}
         placeholder="Ej: Fuerza base — 4 días"
       />
+
+      {count ? (
+        <View style={styles.group}>
+          <Txt variant="label">¿PARA QUÉ SEMANA?</Txt>
+          <View style={styles.chips}>
+            {weeks.map((option) => (
+              <Chip
+                key={option.weekStart}
+                label={option.label}
+                selected={option.weekStart === selectedWeek.weekStart}
+                onPress={() => setSelectedWeek(option)}
+              />
+            ))}
+          </View>
+          <Txt variant="meta" tone={color.textFaint}>
+            Si esa semana ya tenía una rutina asignada, se va a reemplazar.
+          </Txt>
+        </View>
+      ) : null}
 
       <View style={styles.group}>
         <Txt variant="label">ASIGNAR A</Txt>
@@ -155,5 +212,6 @@ export default function AssignCreatedRoutine() {
 
 const styles = StyleSheet.create({
   group: { gap: 9 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   actions: { marginTop: 'auto', gap: 10, paddingTop: 16 },
 });

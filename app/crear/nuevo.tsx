@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -15,8 +15,13 @@ const DAY_OPTIONS = Array.from({ length: 7 }, (_, i) => String(i + 1));
 
 /** 20 · Nuevo creador — nombre y cantidad de días. */
 export default function CreateRoutine() {
-  const { routineName, setRoutineName, setDayCount } = useCreator();
+  const { routineName, setRoutineName, setDayCount, seedPreselect } = useCreator();
+  const { clientId, weekStart } = useLocalSearchParams<{ clientId?: string; weekStart?: string }>();
   const [selectedDays, setSelectedDays] = useState(4);
+
+  useEffect(() => {
+    if (clientId && weekStart) seedPreselect(clientId, weekStart);
+  }, [clientId, seedPreselect, weekStart]);
 
   const goToEditor = (days: number) => {
     setDayCount(days);

@@ -53,8 +53,17 @@ CREATE TABLE IF NOT EXISTS routine (
 ALTER TABLE routine
   ADD COLUMN IF NOT EXISTS plan_id TEXT;
 
+ALTER TABLE routine
+  ADD COLUMN IF NOT EXISTS week_start DATE;
+
+ALTER TABLE routine
+  ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_routine_athlete_plan
   ON routine (athlete_id, plan_id);
+
+CREATE INDEX IF NOT EXISTS idx_routine_athlete_week
+  ON routine (athlete_id, week_start);
 
 CREATE TABLE IF NOT EXISTS routine_exercise (
   routine_id TEXT NOT NULL REFERENCES routine(id),
@@ -75,6 +84,9 @@ CREATE TABLE IF NOT EXISTS client (
   live_elapsed TEXT,
   position INTEGER NOT NULL
 );
+
+ALTER TABLE client
+  ADD COLUMN IF NOT EXISTS clerk_user_id TEXT;
 
 CREATE TABLE IF NOT EXISTS session (
   id TEXT PRIMARY KEY,

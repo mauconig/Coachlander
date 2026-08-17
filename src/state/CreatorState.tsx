@@ -21,6 +21,7 @@ type CreatorState = {
   days: CreatorDay[];
   assignees: string[];
   autoOverload: boolean;
+  preselectWeekStart: string | null;
   setRoutineName: (name: string) => void;
   setDayCount: (count: number) => void;
   addExercise: (day: number, exercise: Omit<CreatorExercise, 'id'>) => void;
@@ -31,6 +32,7 @@ type CreatorState = {
   renameDay: (day: number, name: string) => void;
   toggleAssignee: (id: string) => void;
   setAutoOverload: (on: boolean) => void;
+  seedPreselect: (clientId: string, weekStart: string) => void;
   reset: () => void;
 };
 
@@ -45,6 +47,7 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
   const [days, setDays] = useState<CreatorDay[]>([]);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [autoOverload, setAutoOverload] = useState(true);
+  const [preselectWeekStart, setPreselectWeekStart] = useState<string | null>(null);
 
   const setCount = useCallback((count: number) => {
     setDayCount(count);
@@ -61,6 +64,7 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
       days,
       assignees,
       autoOverload,
+      preselectWeekStart,
       setRoutineName,
       setDayCount: setCount,
       addExercise: (day, exercise) =>
@@ -100,15 +104,20 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
       toggleAssignee: (id) =>
         setAssignees((list) => (list.includes(id) ? list.filter((item) => item !== id) : [...list, id])),
       setAutoOverload,
+      seedPreselect: (clientId, weekStart) => {
+        setAssignees([clientId]);
+        setPreselectWeekStart(weekStart);
+      },
       reset: () => {
         setRoutineName('');
         setDayCount(1);
         setDays([]);
         setAssignees([]);
+        setPreselectWeekStart(null);
         setAutoOverload(true);
       },
     }),
-    [assignees, autoOverload, days, routineName, setCount],
+    [assignees, autoOverload, days, preselectWeekStart, routineName, setCount],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
