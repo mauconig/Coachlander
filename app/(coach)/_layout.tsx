@@ -13,8 +13,8 @@ export default function CoachTabs() {
       }}
     >
       <Tabs.Screen name="alumnos" options={{ title: 'Alumnos' }} />
-      <Tabs.Screen name="rutinas" options={{ title: 'Rutinas' }} />
-      <Tabs.Screen name="mensajes" options={{ title: 'Mensajes' }} />
+      <Tabs.Screen name="rutinas" options={{ title: 'Rutinas creadas' }} />
+      <Tabs.Screen name="estadisticas" options={{ title: 'Estadísticas' }} />
       <Tabs.Screen name="perfil" options={{ title: 'Perfil' }} />
     </Tabs>
   );

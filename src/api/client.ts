@@ -179,3 +179,40 @@ export function selectCurrentRoutine(tokenProvider: TokenProvider, routineId: st
     body: JSON.stringify({ routineId }),
   });
 }
+
+export type TemplateExerciseInput = {
+  name: string;
+  sets: number;
+  reps: string;
+  loadKg: number | null;
+  restSeconds: number;
+  note?: string;
+};
+
+export type TemplateDayInput = {
+  day: number;
+  name: string;
+  exercises: TemplateExerciseInput[];
+};
+
+export function createTemplate(
+  tokenProvider: TokenProvider,
+  input: { name: string; days: TemplateDayInput[]; autoOverload: boolean; completed?: boolean },
+) {
+  return request<{ ok: true; id: string }>(tokenProvider, '/v1/templates', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function assignTemplate(
+  tokenProvider: TokenProvider,
+  templateId: string,
+  input: { clientIds: string[]; autoOverload: boolean },
+) {
+  return request<{ ok: true; results: { clientId: string; planId: string; routineIds: string[] }[] }>(
+    tokenProvider,
+    `/v1/templates/${templateId}/assign`,
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+}

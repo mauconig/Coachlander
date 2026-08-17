@@ -21,7 +21,7 @@ un development build de Expo; Expo Go debe coincidir con el SDK 56 si se usa par
 app/                 rutas Expo Router
   (onboarding)/      bienvenida → crear cuenta → rol → datos → listo
   (athlete)/         hoy · progreso · historial · perfil
-  (coach)/           alumnos · rutinas · mensajes · perfil
+  (coach)/           alumnos · rutinas creadas · estadísticas · perfil
   sesion.tsx         reproductor de sesión en vivo
   ejercicio/[id]     detalle de ejercicio
   rutina/[id]        editor de rutina

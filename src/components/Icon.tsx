@@ -23,7 +23,8 @@ export type IconName =
   | 'profile'
   | 'clients'
   | 'routines'
-  | 'messages';
+  | 'messages'
+  | 'stats';
 
 type Props = {
   name: IconName;
@@ -133,6 +134,12 @@ export function Icon({ name, size = 20, tone = color.textMuted, weight = 2 }: Pr
       )}
       {name === 'messages' && (
         <Path d="M4 5.5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-8.5L7 20.5V16.5H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" {...stroke} />
+      )}
+      {name === 'stats' && (
+        <>
+          <Path d="M4 20V10M10 20V4M16 20v-7M22 20H2" {...stroke} />
+          <Path d="M3 20h18" {...stroke} />
+        </>
       )}
     </Svg>
   );

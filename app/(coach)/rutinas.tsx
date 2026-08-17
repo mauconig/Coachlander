@@ -2,19 +2,17 @@ import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/Card';
-import { Icon } from '@/components/Icon';
 import { SectionHeader } from '@/components/Note';
 import { Row } from '@/components/Row';
 import { Screen } from '@/components/Screen';
 import { Txt } from '@/components/Txt';
 import { getClients, getRoutineSetCount, getTemplates, getTodayRoutine } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
-import { color, radius } from '@/theme/tokens';
+import { color } from '@/theme/tokens';
 
 /**
- * Rutinas tab. The design doc specifies this slot in the coach tab bar (07)
- * and the two screens it leads to — the editor (08) and the AI import (15-18);
- * this is the list that connects them.
+ * Rutinas tab. La biblioteca del entrenador: plantillas guardadas y la rutina
+ * activa. El botón "+" de la barra inferior abre el creador o el import con IA.
  */
 export default function Routines() {
   const templates = useQuery(getTemplates);
@@ -26,24 +24,8 @@ export default function Routines() {
     <Screen scroll gap={16}>
       <View style={styles.header}>
         <Txt variant="eyebrow">BIBLIOTECA</Txt>
-        <Txt variant="h2">Rutinas</Txt>
+        <Txt variant="h2">Rutinas creadas</Txt>
       </View>
-
-      <Card tone="violet" radius={26} padding={22} gap={12} onPress={() => router.push('/importar/origen')}>
-        <Txt variant="label" tone={color.onViolet}>
-          IMPORTAR CON IA
-        </Txt>
-        <Txt variant="h3">Traé una rutina que ya tengas</Txt>
-        <Txt variant="body" tone={color.onVioletStrong}>
-          Subí la planilla o pegá el texto. La IA detecta ejercicios, series y cargas.
-        </Txt>
-        <View style={styles.importCta}>
-          <Txt variant="labelTight" tone={color.ink}>
-            EMPEZAR
-          </Txt>
-          <Icon name="chevron-right" size={14} tone={color.ink} />
-        </View>
-      </Card>
 
       <View style={styles.list}>
         <SectionHeader title="TUS PLANTILLAS" trailing={`${templates.length}`} />
@@ -69,15 +51,5 @@ export default function Routines() {
 
 const styles = StyleSheet.create({
   header: { gap: 3 },
-  importCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: color.lime,
-    borderRadius: radius.pill,
-    paddingVertical: 9,
-    paddingHorizontal: 13,
-  },
   list: { gap: 9 },
 });

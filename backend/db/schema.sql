@@ -124,6 +124,32 @@ CREATE TABLE IF NOT EXISTS template (
   position INTEGER NOT NULL
 );
 
+ALTER TABLE template
+  ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS template_day (
+  template_id TEXT NOT NULL REFERENCES template(id) ON DELETE CASCADE,
+  day INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  PRIMARY KEY (template_id, day)
+);
+
+CREATE TABLE IF NOT EXISTS template_exercise (
+  template_id TEXT NOT NULL REFERENCES template(id) ON DELETE CASCADE,
+  day INTEGER NOT NULL,
+  position INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  sets INTEGER NOT NULL,
+  reps TEXT NOT NULL,
+  load_kg DOUBLE PRECISION,
+  rest_seconds INTEGER NOT NULL,
+  note TEXT,
+  PRIMARY KEY (template_id, day, position)
+);
+
+ALTER TABLE template_exercise
+  ADD COLUMN IF NOT EXISTS note TEXT;
+
 CREATE TABLE IF NOT EXISTS thread (
   client_id TEXT PRIMARY KEY REFERENCES client(id),
   preview TEXT NOT NULL,

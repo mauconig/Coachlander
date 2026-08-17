@@ -358,6 +358,7 @@ function normalizeImportedDays(rawDays) {
         uncertain: rawExercise?.uncertain === true || normalizedLoad(rawExercise?.loadKg) === null,
         raw: textValue(rawExercise?.raw, textValue(rawExercise?.name, '')),
         question: textValue(rawExercise?.question, 'Confirmá la carga inicial antes de guardar.'),
+        note: textValue(rawExercise?.note, '').slice(0, 300),
       })),
     };
   });
@@ -526,6 +527,160 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
     await client.query('ROLLBACK');
     request.log.error({ error }, 'Imported routine save failed');
     return reply.code(500).send({ error: 'No pudimos guardar la rutina' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/v1/templates', { preHandler: authenticate }, async (request, reply) => {
+  const body = request.body ?? {};
+  const name = textValue(body.name, 'Rutina creada').slice(0, 120);
+  let days;
+  try {
+    days = normalizeImportedDays(body.days);
+  } catch (error) {
+    return reply.code(400).send({ error: error.message });
+  }
+  if (days.length < 1 || days.length > 7) {
+    return reply.code(400).send({ error: 'La rutina debe tener entre 1 y 7 días' });
+  }
+
+  await ensureUser(request.userId);
+  const templateId = `template-${randomUUID()}`;
+  const totalExercises = days.reduce((sum, day) => sum + day.exercises.length, 0);
+  const totalSets = days.reduce((sum, day) => sum + day.exercises.reduce((s, exercise) => s + exercise.sets, 0), 0);
+  const meta = `${totalExercises} ejercicios · ${totalSets} series`;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const positionResult = await client.query('SELECT COALESCE(MAX(position), 0) + 1 AS next FROM template');
+    const position = Number(positionResult.rows[0]?.next ?? 0);
+    const completedAt = body.completed === true ? new Date().toISOString() : null;
+    await client.query(
+      `INSERT INTO template (id, name, meta, assigned, position, completed_at) VALUES ($1, $2, $3, NULL, $4, $5)`,
+      [templateId, name, meta, position, completedAt],
+    );
+    for (const day of days) {
+      await client.query(
+        `INSERT INTO template_day (template_id, day, name) VALUES ($1, $2, $3)`,
+        [templateId, day.day, day.name],
+      );
+      for (const [index, exercise] of day.exercises.entries()) {
+        await client.query(
+          `INSERT INTO template_exercise (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [templateId, day.day, index, exercise.name, exercise.sets, exercise.reps, exercise.load, exercise.rest, exercise.note || null],
+        );
+      }
+    }
+    await client.query('COMMIT');
+    return reply.code(201).send({ ok: true, id: templateId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error }, 'Template create failed');
+    return reply.code(500).send({ error: 'No pudimos guardar la plantilla' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (request, reply) => {
+  const templateId = textValue(request.params?.id);
+  const clientIds = Array.isArray(request.body?.clientIds)
+    ? request.body.clientIds.filter((id) => typeof id === 'string')
+    : [];
+  if (!templateId) return reply.code(400).send({ error: 'Falta la plantilla a asignar' });
+  if (!clientIds.length) return reply.code(400).send({ error: 'Elegí al menos un alumno' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const templateResult = await client.query('SELECT id, name FROM template WHERE id = $1', [templateId]);
+    const templateRow = templateResult.rows[0];
+    if (!templateRow) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa plantilla' });
+    }
+
+    const dayRows = await client.query(
+      'SELECT day, name FROM template_day WHERE template_id = $1 ORDER BY day',
+      [templateId],
+    );
+    const exerciseRows = await client.query(
+      'SELECT day, position, name, sets, reps, load_kg, rest_seconds, note FROM template_exercise WHERE template_id = $1 ORDER BY day, position',
+      [templateId],
+    );
+    const days = dayRows.rows.map((row) => ({
+      day: row.day,
+      name: row.name,
+      exercises: exerciseRows.rows.filter((exercise) => exercise.day === row.day),
+    }));
+    if (!days.length) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'La plantilla no tiene ejercicios' });
+    }
+
+    const results = [];
+    for (const athleteId of clientIds) {
+      const planId = `plan-${randomUUID()}`;
+      const routineIds = [];
+      for (const [dayIndex, day] of days.entries()) {
+        const routineId = `routine-${randomUUID()}`;
+        routineIds.push(routineId);
+        const totalSets = day.exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
+        await client.query(
+          `INSERT INTO routine
+            (id, plan_id, name, block, week, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today)
+           VALUES ($1, $2, $3, $4, 1, $5, NULL, $6, $7, 45, $8)`,
+          [
+            routineId,
+            planId,
+            `${templateRow.name} · ${day.name}`,
+            'Plantilla',
+            day.day,
+            athleteId,
+            Math.max(10, Math.ceil(totalSets * 2.25 + day.exercises.length * 1.5)),
+            dayIndex === 0 ? 1 : 0,
+          ],
+        );
+
+        for (const [position, exercise] of day.exercises.entries()) {
+          const exerciseId = `exercise-${randomUUID()}`;
+          const note = typeof exercise.note === 'string' && exercise.note.trim() ? exercise.note.trim() : '';
+          await client.query(
+            `INSERT INTO exercise
+              (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
+               last_date, last_load, last_reps, last_note)
+             VALUES ($1, $2, $3, $4, $5, 30, $6, $7, $8, $9, NULL, NULL, NULL, NULL)`,
+            [
+              exerciseId,
+              exercise.name,
+              `${exercise.sets} × ${exercise.reps}`,
+              exercise.load_kg ?? 0,
+              exercise.sets,
+              exercise.rest_seconds,
+              day.name,
+              note || 'Cargá la plantilla del entrenador y confirmá la técnica antes de comenzar.',
+              body.autoOverload === true ? 2.5 : null,
+            ],
+          );
+          await client.query(
+            `INSERT INTO routine_exercise (routine_id, exercise_id, position)
+             VALUES ($1, $2, $3)`,
+            [routineId, exerciseId, position],
+          );
+        }
+      }
+      results.push({ clientId: athleteId, planId, routineIds });
+    }
+
+    await client.query('COMMIT');
+    return reply.code(201).send({ ok: true, results });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error }, 'Template assign failed');
+    return reply.code(500).send({ error: 'No pudimos asignar la plantilla' });
   } finally {
     client.release();
   }

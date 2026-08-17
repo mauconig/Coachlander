@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { Card } from '@/components/Card';
@@ -34,14 +34,6 @@ export default function Clients() {
           <Txt variant="eyebrow">MODO ENTRENADOR</Txt>
           <Txt variant="h2">{`${clientCount} alumnos`}</Txt>
         </View>
-        <Pressable
-          style={styles.add}
-          onPress={() => router.push('/importar/origen')}
-          accessibilityRole="button"
-          accessibilityLabel="Agregar alumno o rutina"
-        >
-          <Icon name="plus" size={22} tone={color.ink} weight={2.6} />
-        </Pressable>
       </View>
 
       <ChipGroup options={FILTERS} value={filter} onChange={setFilter} />
@@ -91,14 +83,6 @@ export default function Clients() {
 const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   headerText: { gap: 3 },
-  add: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.pill,
-    backgroundColor: color.lime,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   liveText: { flex: 1, gap: 2 },
   liveDot: { width: 10, height: 10, borderRadius: radius.pill, backgroundColor: color.lime },

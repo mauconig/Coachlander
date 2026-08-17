@@ -1,14 +1,15 @@
 import { Tabs } from 'expo-router';
 import { router } from 'expo-router';
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from './Icon';
+import { Sheet } from './Sheet';
 import { Txt } from './Txt';
 import { useApp } from '@/state/AppState';
-import { color } from '@/theme/tokens';
+import { color, radius } from '@/theme/tokens';
 
 /**
  * expo-router vendors its own copy of the bottom-tabs types, so the props are
@@ -25,7 +26,7 @@ const ICONS: Record<string, IconName> = {
   perfil: 'profile',
   alumnos: 'clients',
   rutinas: 'routines',
-  mensajes: 'messages',
+  estadisticas: 'stats',
 };
 
 /**
@@ -34,8 +35,9 @@ const ICONS: Record<string, IconName> = {
  */
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
-  const { draft } = useApp();
-  const canLoadRoutine = draft.role === 'athlete' && draft.soloTraining;
+  const { role } = useApp();
+  const isCoach = role === 'coach';
+  const [creatorOpen, setCreatorOpen] = useState(false);
 
   return (
     <View style={[styles.bar, { paddingBottom: insets.bottom + 14 }]}>
@@ -55,11 +57,11 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
 
         return (
           <Fragment key={route.key}>
-            {canLoadRoutine && index === 2 ? (
+            {isCoach && index === 2 ? (
               <Pressable
-                onPress={() => router.push('/importar/origen')}
+                onPress={() => setCreatorOpen(true)}
                 accessibilityRole="button"
-                accessibilityLabel="Cargar rutina"
+                accessibilityLabel="Nueva rutina"
                 style={styles.loadButton}
               >
                 <Icon name="plus" size={26} tone={color.ink} weight={2.4} />
@@ -81,6 +83,44 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
           </Fragment>
         );
       })}
+
+      <Sheet visible={creatorOpen} onClose={() => setCreatorOpen(false)} eyebrow="NUEVA RUTINA" title="¿Cómo querés armarla?">
+        <Pressable
+          onPress={() => {
+            setCreatorOpen(false);
+            router.push('/crear/nuevo');
+          }}
+          accessibilityRole="button"
+          style={styles.option}
+        >
+          <View style={styles.optionMark}>
+            <Icon name="plus" size={18} tone={color.ink} weight={2.4} />
+          </View>
+          <View style={styles.optionText}>
+            <Txt variant="rowTitle">Creador de rutinas</Txt>
+            <Txt variant="meta">Armala desde cero, día por día</Txt>
+          </View>
+          <Icon name="chevron-right" size={16} tone={color.textMuted} />
+        </Pressable>
+
+        <Pressable
+          onPress={() => {
+            setCreatorOpen(false);
+            router.push('/importar/origen');
+          }}
+          accessibilityRole="button"
+          style={[styles.option, styles.optionAlt]}
+        >
+          <View style={[styles.optionMark, styles.optionMarkAlt]}>
+            <Icon name="file" size={18} tone={color.text} weight={2.4} />
+          </View>
+          <View style={styles.optionText}>
+            <Txt variant="rowTitle">Importar con IA</Txt>
+            <Txt variant="meta">Traé una planilla o pegá el texto</Txt>
+          </View>
+          <Icon name="chevron-right" size={16} tone={color.textMuted} />
+        </Pressable>
+      </Sheet>
     </View>
   );
 }
@@ -108,4 +148,27 @@ const styles = StyleSheet.create({
     borderColor: color.screen,
   },
   label: { letterSpacing: 0.9 },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: color.surfaceAlt,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.lg,
+    padding: 16,
+  },
+  optionAlt: { marginBottom: 2 },
+  optionMark: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.xs,
+    backgroundColor: color.lime,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionMarkAlt: {
+    backgroundColor: color.violet,
+  },
+  optionText: { flex: 1, gap: 2 },
 });
