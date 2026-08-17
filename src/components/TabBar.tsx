@@ -35,8 +35,10 @@ const ICONS: Record<string, IconName> = {
  */
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
-  const { role } = useApp();
+  const { role, draft } = useApp();
   const isCoach = role === 'coach';
+  const isSoloAthlete = role === 'athlete' && draft.soloTraining;
+  const showPlus = isCoach || isSoloAthlete;
   const [creatorOpen, setCreatorOpen] = useState(false);
 
   return (
@@ -57,7 +59,7 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
 
         return (
           <Fragment key={route.key}>
-            {isCoach && index === 2 ? (
+            {showPlus && index === 2 ? (
               <Pressable
                 onPress={() => setCreatorOpen(true)}
                 accessibilityRole="button"

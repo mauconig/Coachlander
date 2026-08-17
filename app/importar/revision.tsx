@@ -11,7 +11,7 @@ import { TopBar } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
 import { getMetaNumber } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
-import { weight } from '@/lib/format';
+import { num } from '@/lib/format';
 import { useApp } from '@/state/AppState';
 import { useImport } from '@/state/ImportState';
 import { color, radius } from '@/theme/tokens';
@@ -19,7 +19,7 @@ import { color, radius } from '@/theme/tokens';
 /** 17 · Lo que detectó la IA — review before anything is saved. */
 export default function ImportReview() {
   const { unit } = useApp();
-  const { detected, routineName, sourceLabel, resolve, discard } = useImport();
+  const { detected, routineName, sourceLabel, resolve, discard, setLoad } = useImport();
   const estimateMinutes = useQuery((db) => getMetaNumber(db, 'import_estimate_minutes'));
 
   const totalSets = detected.reduce((n, e) => n + e.sets, 0);
@@ -120,13 +120,23 @@ export default function ImportReview() {
                 </Pressable>
               </Card>
             ) : (
-              <Row
-                key={item.id}
-                left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
-                title={item.name}
-                meta={`${item.sets} × ${item.reps} · ${item.load === null ? 'carga a confirmar' : weight(item.load, unit)} · ${item.rest} s`}
-                chevron
-              />
+              <Card key={item.id} radius={radius.md} padding={14} gap={10}>
+                <Row
+                  left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
+                  title={item.name}
+                  meta={`${item.sets} × ${item.reps} · ${item.rest} s`}
+                />
+                <View style={styles.loadRow}>
+                  <Txt variant="label" tone={color.textMuted}>
+                    CARGA SUGERIDA
+                  </Txt>
+                  <LoadStepper
+                    value={item.load}
+                    onChange={(load) => setLoad(item.id, load)}
+                    unit={unit}
+                  />
+                </View>
+              </Card>
             )}
           </Fragment>
         ))}
@@ -135,7 +145,67 @@ export default function ImportReview() {
   );
 }
 
+function LoadStepper({
+  value,
+  onChange,
+  unit,
+}: {
+  value: number | null;
+  onChange: (load: number | null) => void;
+  unit: 'kg' | 'lb';
+}) {
+  const label = value === null ? 'a confirmar' : `${num(value)} ${unit}`;
+  return (
+    <View style={styles.stepper}>
+      <Pressable
+        onPress={() => onChange(value === null ? 0 : Math.max(0, value - 2.5))}
+        accessibilityRole="button"
+        accessibilityLabel="Bajar carga"
+        hitSlop={8}
+      >
+        <Txt variant="numeric" tone={color.textFaint}>
+          −
+        </Txt>
+      </Pressable>
+      <Txt variant="labelTight" tone={value === null ? color.textFaint : color.lime} style={styles.stepperValue}>
+        {label}
+      </Txt>
+      <Pressable
+        onPress={() => onChange(value === null ? 2.5 : value + 2.5)}
+        accessibilityRole="button"
+        accessibilityLabel="Subir carga"
+        hitSlop={8}
+      >
+        <Txt variant="numeric" tone={color.textFaint}>
+          +
+        </Txt>
+      </Pressable>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  loadRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: color.hairline,
+    paddingTop: 10,
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: color.screen,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.pill,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  stepperValue: { minWidth: 54, textAlign: 'center' },
   badges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   dayLabel: { paddingTop: 10 },
   badgeLime: {

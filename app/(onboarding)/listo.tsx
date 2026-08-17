@@ -5,7 +5,7 @@ import { Button } from '@/components/Button';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import { Txt } from '@/components/Txt';
-import { getCoach, getRoutineSetCount, getTodayRoutine } from '@/db/queries';
+import { getCoach } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { useApp } from '@/state/AppState';
 import { color, radius } from '@/theme/tokens';
@@ -20,8 +20,6 @@ const PROMISES = [
 export default function Ready() {
   const { draft, finishOnboarding } = useApp();
   const coach = useQuery(getCoach);
-  const routine = useQuery(getTodayRoutine);
-  const totalSets = useQuery(getRoutineSetCount);
   const isCoach = draft.role === 'coach';
   const soloTraining = draft.soloTraining;
 
@@ -45,7 +43,7 @@ export default function Ready() {
             ? 'Agregá a tu primer alumno o importá una rutina que ya tengas armada.'
             : soloTraining
               ? 'Tu dashboard está listo. Cuando tengas una rutina, va a aparecer acá.'
-              : `${coach.firstName} armó tu semana 1. Empezás con ${routine.name}: ${routine.exercises.length} ejercicios, ${totalSets} series, ${routine.estimatedMinutes} minutos estimados.`}
+              : `Le pediste un plan a ${coach.firstName}. Cuando te lo asigne, va a aparecer en tu panel de Hoy.`}
         </Txt>
       </View>
 

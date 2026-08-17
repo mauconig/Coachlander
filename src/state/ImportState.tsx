@@ -19,6 +19,7 @@ type ImportState = {
   setDetected: (lines: ImportedExercise[]) => void;
   resolve: (id: string, optionIndex: 0 | 1) => void;
   discard: (id: string) => void;
+  setLoad: (id: string, load: number | null) => void;
   setRoutineName: (name: string) => void;
   toggleAssignee: (id: string) => void;
   setAutoOverload: (on: boolean) => void;
@@ -58,6 +59,10 @@ export function ImportProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const setLoad = useCallback((id: string, load: number | null) => {
+    setDetected((list) => list.map((item) => (item.id === id ? { ...item, load } : item)));
+  }, []);
+
   const value = useMemo<ImportState>(
     () => ({
       origin,
@@ -72,6 +77,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       setDetected,
       resolve,
       discard: (id) => setDetected((list) => list.filter((item) => item.id !== id)),
+      setLoad,
       setRoutineName,
       toggleAssignee: (id) =>
         setAssignees((list) => (list.includes(id) ? list.filter((item) => item !== id) : [...list, id])),

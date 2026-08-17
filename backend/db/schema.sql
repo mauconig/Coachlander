@@ -220,3 +220,10 @@ CREATE TABLE IF NOT EXISTS set_log (
 
 CREATE INDEX IF NOT EXISTS idx_set_log_user_exercise
   ON set_log (clerk_user_id, exercise_id, logged_at);
+
+CREATE TABLE IF NOT EXISTS load_reference (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  pct_bodyweight DOUBLE PRECISION,
+  base_load DOUBLE PRECISION
+);

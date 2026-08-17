@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
@@ -12,7 +13,7 @@ import { Txt } from '@/components/Txt';
 import { getCoach } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { useApp, type Experience, type TrainingPlace } from '@/state/AppState';
-import { radius } from '@/theme/tokens';
+import { color, radius } from '@/theme/tokens';
 
 const EXPERIENCE: readonly Experience[] = ['Empiezo', '1-3 años', '+3 años'] as const;
 const DAYS = [2, 3, 4, 5, 6];
@@ -23,8 +24,15 @@ export default function ProfileSetup() {
   const { draft, patchDraft } = useApp();
   const coach = useQuery(getCoach);
   const connected = !draft.soloTraining && !!draft.coachName;
+  const [error, setError] = useState('');
 
   const finish = () => {
+    const isAthlete = draft.role === 'athlete';
+    if (isAthlete && (!draft.weightKg.trim() || !draft.heightM.trim())) {
+      setError('Cargá tu peso y tu altura para que podamos sugerirte cargas.');
+      return;
+    }
+    setError('');
     router.push('/listo');
   };
 
@@ -101,6 +109,8 @@ export default function ProfileSetup() {
           mono={false}
         />
       </View>
+
+      {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}
 
       <Button
         label={

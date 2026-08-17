@@ -1,9 +1,9 @@
 import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { assignTemplate, createTemplate } from '@/api/client';
+import { assignTemplate, createTemplate, saveImportedRoutine } from '@/api/client';
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
@@ -15,62 +15,70 @@ import { Screen } from '@/components/Screen';
 import { RadioDot, Toggle } from '@/components/Toggle';
 import { TopBar } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
-import { getClients } from '@/db/queries';
+import {
+  getClients,
+  getCurrentWeekStart,
+  getNextWeekStart,
+  weekIndexOf,
+} from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { useApp } from '@/state/AppState';
 import { useCreator } from '@/state/CreatorState';
 import { useRefreshRemoteData } from '@/state/RemoteState';
 import { color, radius } from '@/theme/tokens';
 
-const MONTHS = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
+type WeekOption = { key: 'this' | 'next'; label: string; weekStart: string };
 
-/** Los lunes del mes actual: { week, weekStart (YYYY-MM-DD), label } */
-function monthWeeks(now: Date): { week: number; weekStart: string; label: string }[] {
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const mondays: Date[] = [];
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = new Date(year, month, day);
-    if (date.getDay() === 1) mondays.push(date);
-  }
-  if (!mondays.length) mondays.push(new Date(year, month, 1));
-
-  return mondays.map((date, i) => {
-    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    return {
-      week: i + 1,
-      weekStart: iso,
-      label: `SEM ${i + 1} · ${String(date.getDate()).padStart(2, '0')} ${MONTHS[date.getMonth()]}`,
-    };
-  });
-}
-
-/** 24 · Guardar y asignar — plantilla y/o alumnos, eligiendo la semana. */
+/** 24 · Guardar y asignar. El entrenador elige semana y alumnos; el atleta
+ *  solo guarda la rutina directamente en su plan. */
 export default function AssignCreatedRoutine() {
   const { getToken } = useAuth();
-  const { unit } = useApp();
+  const { unit, role, draft } = useApp();
   const refreshRemoteData = useRefreshRemoteData();
   const { routineName, setRoutineName, days, assignees, toggleAssignee, autoOverload, setAutoOverload, reset, preselectWeekStart } =
     useCreator();
 
+  const isCoach = role === 'coach';
+  const isSoloAthlete = role === 'athlete' && draft.soloTraining;
   const clients = useQuery(getClients);
   const count = assignees.length;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const weeks = useMemo(() => monthWeeks(new Date()), []);
-  const currentWeek = weeks.find((w) => w.weekStart === new Date().toISOString().slice(0, 10));
-  const [selectedWeek, setSelectedWeek] = useState(currentWeek ?? weeks[0]);
+  const weekOptions: WeekOption[] = [
+    { key: 'this', label: 'ESTA SEMANA', weekStart: getCurrentWeekStart() },
+    { key: 'next', label: 'SIGUIENTE SEMANA', weekStart: getNextWeekStart() },
+  ];
+  const [selectedWeek, setSelectedWeek] = useState<WeekOption>(weekOptions[0]);
 
   useEffect(() => {
     if (!preselectWeekStart) return;
-    const preset = weeks.find((w) => w.weekStart === preselectWeekStart.slice(0, 10));
+    const preset = weekOptions.find((w) => w.weekStart === preselectWeekStart.slice(0, 10));
     if (preset) setSelectedWeek(preset);
-  }, [preselectWeekStart, weeks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preselectWeekStart]);
 
-  const publish = async (asTemplate: boolean) => {
-    const nonEmptyDays = days
+  const importDays = () =>
+    days
+      .filter((d) => d.exercises.length > 0)
+      .map((d) => ({
+        day: d.day,
+        name: d.name.trim() || `Día ${d.day}`,
+        exercises: d.exercises.map((e) => ({
+          id: e.id,
+          name: e.name.trim(),
+          sets: e.sets,
+          reps: e.reps,
+          restSeconds: e.restSeconds,
+          day: d.day,
+          load: null,
+          rest: e.restSeconds,
+          note: e.note.trim(),
+        })),
+      }));
+
+  const templateDays = () =>
+    days
       .filter((d) => d.exercises.length > 0)
       .map((d) => ({
         day: d.day,
@@ -79,13 +87,40 @@ export default function AssignCreatedRoutine() {
           name: e.name.trim(),
           sets: e.sets,
           reps: e.reps,
-          loadKg: e.loadKg,
+          loadKg: null,
           restSeconds: e.restSeconds,
           note: e.note.trim(),
         })),
       }));
 
-    if (!nonEmptyDays.length) {
+  const publishSolo = async () => {
+    const list = importDays();
+    if (!list.length) {
+      setError('Agregá al menos un ejercicio antes de guardar.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await saveImportedRoutine(getToken, {
+        routineName: routineName.trim() || 'Mi rutina',
+        days: list,
+        autoOverload,
+      });
+      await refreshRemoteData();
+      reset();
+      router.dismissAll();
+      router.replace('/hoy');
+    } catch (saveError: unknown) {
+      setError(saveError instanceof Error ? saveError.message : 'No pudimos guardar la rutina.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const publishCoach = async (asTemplate: boolean) => {
+    const list = templateDays();
+    if (!list.length) {
       setError('Agregá al menos un ejercicio antes de guardar.');
       return;
     }
@@ -93,21 +128,19 @@ export default function AssignCreatedRoutine() {
       setError('Elegí al menos un alumno o guardá como plantilla.');
       return;
     }
-
     setSaving(true);
     setError('');
     try {
       const template = await createTemplate(getToken, {
         name: routineName.trim() || 'Rutina creada',
-        days: nonEmptyDays,
+        days: list,
         autoOverload,
-        completed: true,
       });
       if (count) {
         await assignTemplate(getToken, template.id, {
           clientIds: assignees,
           autoOverload,
-          week: selectedWeek.week,
+          week: weekIndexOf(selectedWeek.weekStart),
           weekStart: selectedWeek.weekStart,
           replace: true,
         });
@@ -123,6 +156,11 @@ export default function AssignCreatedRoutine() {
     }
   };
 
+  const publish = () => {
+    if (isSoloAthlete) return publishSolo();
+    return publishCoach(true);
+  };
+
   if (saving) {
     return (
       <AppLoadingScreen
@@ -136,26 +174,34 @@ export default function AssignCreatedRoutine() {
     <Screen scroll gap={15}>
       <TopBar title="ÚLTIMO PASO" />
 
-      <Heading
-        title="Guardá tu rutina"
-        subtitle="Queda como plantilla en tu biblioteca y elegí la semana para tus alumnos."
-        variant="h2"
-      />
+      {isSoloAthlete ? (
+        <Heading
+          title="Guardá tu rutina"
+          subtitle="Queda en tu plan y la vas a ver en Hoy."
+          variant="h2"
+        />
+      ) : (
+        <Heading
+          title="Guardá tu rutina"
+          subtitle="Queda como plantilla en tu biblioteca y elegí la semana para tus alumnos."
+          variant="h2"
+        />
+      )}
 
       <Field
         label="NOMBRE DE LA RUTINA"
         value={routineName}
         onChangeText={setRoutineName}
-        placeholder="Ej: Fuerza base — 4 días"
+        placeholder={isSoloAthlete ? 'Ej: Mi rutina de fuerza' : 'Ej: Fuerza base — 4 días'}
       />
 
-      {count ? (
+      {isCoach && count ? (
         <View style={styles.group}>
           <Txt variant="label">¿PARA QUÉ SEMANA?</Txt>
           <View style={styles.chips}>
-            {weeks.map((option) => (
+            {weekOptions.map((option) => (
               <Chip
-                key={option.weekStart}
+                key={option.key}
                 label={option.label}
                 selected={option.weekStart === selectedWeek.weekStart}
                 onPress={() => setSelectedWeek(option)}
@@ -168,22 +214,24 @@ export default function AssignCreatedRoutine() {
         </View>
       ) : null}
 
-      <View style={styles.group}>
-        <Txt variant="label">ASIGNAR A</Txt>
-        {clients.map((client) => {
-          const selected = assignees.includes(client.id);
-          return (
-            <Row
-              key={client.id}
-              tone={selected ? 'violet' : 'surface'}
-              left={<Avatar name={client.name} size={38} tone={selected ? 'ink' : 'neutral'} />}
-              title={client.name}
-              right={<RadioDot selected={selected} />}
-              onPress={() => toggleAssignee(client.id)}
-            />
-          );
-        })}
-      </View>
+      {isCoach ? (
+        <View style={styles.group}>
+          <Txt variant="label">ASIGNAR A</Txt>
+          {clients.map((client) => {
+            const selected = assignees.includes(client.id);
+            return (
+              <Row
+                key={client.id}
+                tone={selected ? 'violet' : 'surface'}
+                left={<Avatar name={client.name} size={38} tone={selected ? 'ink' : 'neutral'} />}
+                title={client.name}
+                right={<RadioDot selected={selected} />}
+                onPress={() => toggleAssignee(client.id)}
+              />
+            );
+          })}
+        </View>
+      ) : null}
 
       <Row
         title="Overload automático"
@@ -194,17 +242,23 @@ export default function AssignCreatedRoutine() {
       {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}
 
       <View style={styles.actions}>
-        <Button
-          label={count ? `Marcar como completada · ${count} ${count === 1 ? 'alumno' : 'alumnos'}` : 'Marcar como completada'}
-          onPress={() => publish(true)}
-        />
-        {count ? (
-          <Pressable onPress={() => publish(false)} accessibilityRole="button">
-            <Txt variant="body" tone={color.textFaint} center>
-              Solo guardar como plantilla
-            </Txt>
-          </Pressable>
-        ) : null}
+        {isCoach ? (
+          <>
+            <Button
+              label={count ? `Marcar como completada · ${count} ${count === 1 ? 'alumno' : 'alumnos'}` : 'Guardar como plantilla'}
+              onPress={() => publishCoach(true)}
+            />
+            {count ? (
+              <Pressable onPress={() => publishCoach(false)} accessibilityRole="button">
+                <Txt variant="body" tone={color.textFaint} center>
+                  Solo guardar como plantilla
+                </Txt>
+              </Pressable>
+            ) : null}
+          </>
+        ) : (
+          <Button label="Guardar en mi plan" onPress={() => publish()} />
+        )}
       </View>
     </Screen>
   );

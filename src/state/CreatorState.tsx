@@ -5,7 +5,6 @@ export type CreatorExercise = {
   name: string;
   sets: number;
   reps: string;
-  loadKg: number | null;
   restSeconds: number;
   note: string;
 };

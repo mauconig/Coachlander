@@ -117,9 +117,19 @@ export function getTodayRoutine(data: RemoteData): Routine {
     data.user?.role === 'athlete'
       ? rows(data, 'routine').filter((row) => row.athlete_id === data.user?.id)
       : rows(data, 'routine');
-  const routineRow =
-    routineRows.find((row) => booleanValue(row, 'is_today')) ??
-    (data.user?.role === 'athlete' ? undefined : routineRows[0]);
+
+  let routineRow: Row | undefined;
+  if (data.user?.role === 'athlete' && !data.user.soloTraining) {
+    // Atleta con entrenador: la rutina de la semana actual (calendario real).
+    const currentWeek = getCurrentWeekStart();
+    const weekRows = routineRows.filter((row) => String(stringValue(row, 'week_start')).slice(0, 10) === currentWeek);
+    routineRow = weekRows.find((row) => booleanValue(row, 'is_today')) ?? weekRows[0];
+  } else {
+    routineRow =
+      routineRows.find((row) => booleanValue(row, 'is_today')) ??
+      (data.user?.role === 'athlete' ? undefined : routineRows[0]);
+  }
+
   const routineId = stringValue(routineRow, 'id');
   const coachId = stringValue(routineRow, 'coach_id');
   const exerciseRows = rows(data, 'routine_exercise')
@@ -151,6 +161,33 @@ export type RoutineOption = {
   exerciseCount: number;
   selected: boolean;
 };
+
+/** Arma un Routine completo (con ejercicios) a partir de un id de rutina. */
+export function getRoutineById(data: RemoteData, routineId: string): Routine | null {
+  const routineRow = rows(data, 'routine').find((row) => stringValue(row, 'id') === routineId);
+  if (!routineRow) return null;
+  const coachId = stringValue(routineRow, 'coach_id');
+  const exerciseRows = rows(data, 'routine_exercise')
+    .filter((row) => row.routine_id === routineId)
+    .sort((a, b) => numberValue(a, 'position') - numberValue(b, 'position'));
+  const exercises = exerciseRows
+    .map((link) => getExercise(data, stringValue(link, 'exercise_id')))
+    .filter((exercise): exercise is Exercise => exercise !== null);
+  const coach = rows(data, 'coach').find((row) => row.id === coachId) ?? first(data, 'coach');
+
+  return {
+    id: routineId,
+    name: stringValue(routineRow, 'name'),
+    block: stringValue(routineRow, 'block'),
+    week: numberValue(routineRow, 'week'),
+    day: numberValue(routineRow, 'day'),
+    coach: stringValue(coach, 'short_name'),
+    athleteId: stringValue(routineRow, 'athlete_id'),
+    estimatedMinutes: numberValue(routineRow, 'estimated_minutes'),
+    secondsPerSet: numberValue(routineRow, 'seconds_per_set'),
+    exercises,
+  };
+}
 
 export function getRoutineOptions(data: RemoteData): RoutineOption[] {
   const routineRows =
@@ -215,8 +252,9 @@ export function getClient(data: RemoteData, id: string): Client | null {
 export function getClientWeeks(data: RemoteData, athleteId: string): string[] {
   const weeks = new Set<string>();
   for (const row of rows(data, 'routine')) {
-    if (stringValue(row, 'athlete_id') === athleteId && stringValue(row, 'week_start')) {
-      weeks.add(stringValue(row, 'week_start'));
+    const weekStart = stringValue(row, 'week_start').slice(0, 10);
+    if (stringValue(row, 'athlete_id') === athleteId && weekStart) {
+      weeks.add(weekStart);
     }
   }
   return [...weeks].sort();
@@ -236,7 +274,11 @@ export type ClientRoutineDay = {
 
 export function getClientWeekRoutines(data: RemoteData, athleteId: string, weekStart: string): ClientRoutineDay[] {
   return [...rows(data, 'routine')]
-    .filter((row) => stringValue(row, 'athlete_id') === athleteId && stringValue(row, 'week_start') === weekStart)
+    .filter(
+      (row) =>
+        stringValue(row, 'athlete_id') === athleteId &&
+        stringValue(row, 'week_start').slice(0, 10) === weekStart,
+    )
     .sort((a, b) => numberValue(a, 'day') - numberValue(b, 'day'))
     .map((row) => {
       const routineId = stringValue(row, 'id');
@@ -250,7 +292,7 @@ export function getClientWeekRoutines(data: RemoteData, athleteId: string, weekS
         day: numberValue(row, 'day'),
         name: stringValue(row, 'name'),
         week: numberValue(row, 'week'),
-        weekStart: stringValue(row, 'week_start'),
+        weekStart: stringValue(row, 'week_start').slice(0, 10),
         completed: booleanValue(row, 'completed_at'),
         exerciseCount: links.length,
         totalSets,

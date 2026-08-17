@@ -217,6 +217,22 @@ export function assignTemplate(
   );
 }
 
+export type UpdateExerciseInput = {
+  suggested: number;
+  sets: number;
+  reps: string;
+  rest: number;
+  overload: number | null;
+};
+
+export function updateExercise(tokenProvider: TokenProvider, exerciseId: string, input: UpdateExerciseInput) {
+  return request<{ ok: true; exercise: Record<string, unknown> }>(
+    tokenProvider,
+    `/v1/exercises/${exerciseId}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
+
 export function completeRoutine(tokenProvider: TokenProvider, routineId: string) {
   return request<{ ok: true; id: string; completedAt: string }>(
     tokenProvider,

@@ -49,6 +49,7 @@ export default function Today() {
   };
 
   if (!routine.id) {
+    const waitingForCoach = remoteData.user?.role === 'athlete' && !remoteData.user?.soloTraining;
     return (
       <Screen scroll gap={18}>
         <View style={styles.header}>
@@ -63,9 +64,11 @@ export default function Today() {
           <View style={styles.emptyIcon}>
             <Icon name="play" size={24} tone={color.ink} />
           </View>
-          <Txt variant="h1">Tu dashboard está vacío</Txt>
+          <Txt variant="h1">{waitingForCoach ? 'Esperando tu plan' : 'Tu dashboard está vacío'}</Txt>
           <Txt variant="bodyLg" tone={color.textMuted} center>
-            Cuando tengas una rutina disponible, va a aparecer acá.
+            {waitingForCoach
+              ? 'Tu entrenador va a asignarte una rutina para esta semana.'
+              : 'Cuando tengas una rutina disponible, va a aparecer acá.'}
           </Txt>
         </View>
       </Screen>
@@ -82,7 +85,7 @@ export default function Today() {
         <Avatar name={athlete.name} size={44} />
       </View>
 
-      {isAdmin && routineOptions.length > 1 ? (
+      {(isAdmin || remoteData.user?.soloTraining) && routineOptions.length > 1 ? (
         <View style={styles.library}>
           <SectionHeader title="ELEGÍ TU RUTINA" trailing={`${routineOptions.length} DÍAS`} />
           <ScrollView

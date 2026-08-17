@@ -163,7 +163,7 @@ function ExerciseItem({
           </Pressable>
         }
         title={exercise.name}
-        meta={`${exercise.sets} × ${exercise.reps} · ${exercise.loadKg === null ? 'PC' : `${exercise.loadKg} kg`}`}
+                meta={`${exercise.sets} × ${exercise.reps}`}
         chevron
         onPress={onPress}
         active={isActive}
@@ -233,12 +233,6 @@ function ExerciseEditor({
           label="REPS"
           value={exercise.reps}
           onStep={(d) => onPatch({ reps: `${Math.max(1, repsNumber + d)}` })}
-        />
-        <Stepper
-          label="KG"
-          value={exercise.loadKg === null ? 'PC' : String(exercise.loadKg)}
-          accent
-          onStep={(d) => onPatch({ loadKg: Math.max(0, (exercise.loadKg ?? 0) + d * 2.5) })}
         />
       </View>
 

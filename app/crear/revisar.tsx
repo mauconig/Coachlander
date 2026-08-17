@@ -60,7 +60,7 @@ export default function CreatorReview() {
                   <Row
                     left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
                     title={exercise.name}
-                    meta={`${exercise.sets} × ${exercise.reps} · ${exercise.loadKg === null ? 'PC' : `${exercise.loadKg} kg`}`}
+                    meta={`${exercise.sets} × ${exercise.reps}`}
                   />
                   {exercise.note.trim() ? (
                     <Txt variant="meta" tone={color.textFaint} style={styles.note}>

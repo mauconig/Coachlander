@@ -144,9 +144,16 @@ async function readBootstrap(userId) {
       continue;
     }
 
-    const result = await pool.query(
-      `SELECT * FROM ${quoteIdentifier(table)} ORDER BY ${orderBy[table] ?? '1'}`,
-    );
+    const result =
+      table === 'template'
+        ? await pool.query(
+            `SELECT t.*
+             FROM template t
+             WHERE EXISTS (SELECT 1 FROM template_day td WHERE td.template_id = t.id)
+               AND EXISTS (SELECT 1 FROM template_exercise te WHERE te.template_id = t.id)
+             ORDER BY t.position`,
+          )
+        : await pool.query(`SELECT * FROM ${quoteIdentifier(table)} ORDER BY ${orderBy[table] ?? '1'}`);
     tables[table] = result.rows;
   }
 
@@ -333,6 +340,89 @@ function normalizedInteger(value, fallback, min, max) {
   return Math.min(max, Math.max(min, Math.round(number)));
 }
 
+/** Número de semana (1-5) del mes para una fecha YYYY-MM-DD (cuenta los lunes). */
+function weekOfMonth(dateStr) {
+  const date = new Date(`${dateStr}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return 1;
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth();
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  let week = 1;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const d = new Date(Date.UTC(year, month, day));
+    if (d.getUTCDay() !== 1) continue;
+    if (d.getTime() <= date.getTime()) week++;
+  }
+  return week;
+}
+
+/** Normaliza un nombre para matcheo: minúsculas y sin acentos. */
+function normalizeName(value) {
+  return String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Redondea a 0,5 kg. */
+function roundLoad(value) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return Math.round(Math.max(0, value) * 2) / 2;
+}
+
+/**
+ * Predice la carga sugerida para un alumno y un ejercicio:
+ * 1) Historial del alumno (set_log por nombre normalizado): lo respeta tal cual.
+ * 2) Sin historial: catálogo load_reference (peso libre % peso corporal, máquina
+ *    base_load escalada por el peso del alumno).
+ * 3) Sin match: null (a confirmar).
+ */
+async function predictLoad(client, athleteId, exerciseName, weightKg) {
+  const normalized = normalizeName(exerciseName);
+  if (!normalized) return null;
+
+  const history = await client.query(
+    `SELECT e.name, sl.load, sl.reps, sl.logged_at
+       FROM set_log sl
+       JOIN exercise e ON e.id = sl.exercise_id
+      WHERE sl.clerk_user_id = $1 AND sl.load IS NOT NULL AND sl.load > 0
+      ORDER BY sl.logged_at DESC
+      LIMIT 500`,
+    [athleteId],
+  );
+  for (const row of history.rows) {
+    if (normalizeName(row.name) === normalized) {
+      return roundLoad(row.load);
+    }
+  }
+
+  const ref = await client.query(
+    'SELECT pct_bodyweight, base_load FROM load_reference WHERE name = $1 LIMIT 1',
+    [normalized],
+  );
+  const reference = ref.rows[0];
+  if (!reference) return null;
+
+  if (reference.pct_bodyweight != null && Number.isFinite(Number(reference.pct_bodyweight))) {
+    const weight = Number(weightKg);
+    if (Number.isFinite(weight) && weight > 0) {
+      return roundLoad(reference.pct_bodyweight * weight);
+    }
+    return roundLoad(reference.base_load ?? null);
+  }
+  if (reference.base_load != null && Number.isFinite(Number(reference.base_load))) {
+    const weight = Number(weightKg);
+    if (Number.isFinite(weight) && weight > 0) {
+      const factor = Math.min(1.5, Math.max(0.5, weight / 70));
+      return roundLoad(reference.base_load * factor);
+    }
+    return roundLoad(reference.base_load);
+  }
+  return null;
+}
+
 function normalizeImportedDays(rawDays) {
   if (!Array.isArray(rawDays) || rawDays.length < 1 || rawDays.length > 7) {
     throw new Error('DeepSeek debe devolver entre uno y siete días');
@@ -442,11 +532,36 @@ app.post('/v1/import/parse', { preHandler: authenticate }, async (request, reply
   const weightKg = Number.isFinite(storedWeightKg) ? storedWeightKg : Number(body.weightKg);
   const heightM = Number.isFinite(storedHeightM) ? storedHeightM : Number(body.heightM);
   try {
-    return await interpretRoutine({
+    const result = await interpretRoutine({
       text,
       weightKg: Number.isFinite(weightKg) && weightKg > 0 ? weightKg : null,
       heightM: Number.isFinite(heightM) && heightM > 0 ? heightM : null,
     });
+
+    // Recalcula las cargas con el predictor del atleta (historial + catálogo).
+    const client = await pool.connect();
+    try {
+      const predictedLoads = new Map();
+      for (const exercise of result.exercises) {
+        const load = await predictLoad(client, request.userId, exercise.name, weightKg);
+        predictedLoads.set(exercise.id, load);
+      }
+      result.exercises = result.exercises.map((exercise) => ({
+        ...exercise,
+        load: predictedLoads.get(exercise.id) ?? exercise.load,
+        uncertain: predictedLoads.get(exercise.id) === null ? exercise.uncertain : exercise.uncertain,
+      }));
+      for (const day of result.days) {
+        day.exercises = day.exercises.map((exercise) => ({
+          ...exercise,
+          load: predictedLoads.get(exercise.id) ?? exercise.load,
+        }));
+      }
+    } finally {
+      client.release();
+    }
+
+    return result;
   } catch (error) {
     if (error?.code === 'DEEPSEEK_NOT_CONFIGURED') {
       return reply.code(503).send({ error: error.message });
@@ -593,11 +708,9 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   if (!templateId) return reply.code(400).send({ error: 'Falta la plantilla a asignar' });
   if (!clientIds.length) return reply.code(400).send({ error: 'Elegí al menos un alumno' });
 
-  const week = Number(request.body?.week);
   const weekStart = textValue(request.body?.weekStart);
-  if (!Number.isInteger(week) || week < 1 || week > 5 || !weekStart) {
-    return reply.code(400).send({ error: 'Elegí una semana válida (1 a 5) para asignar' });
-  }
+  if (!weekStart) return reply.code(400).send({ error: 'Falta la semana a asignar' });
+  const week = Number(request.body?.week) > 0 ? Number(request.body?.week) : weekOfMonth(weekStart);
   const replace = request.body?.replace === true;
 
   const client = await pool.connect();
@@ -632,6 +745,11 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
     for (const clientId of clientIds) {
       const clientRow = await client.query('SELECT clerk_user_id FROM client WHERE id = $1', [clientId]);
       const athleteId = clientRow.rows[0]?.clerk_user_id || clientId;
+      const profile = await client.query(
+        'SELECT weight_kg, height_m FROM app_user WHERE clerk_user_id = $1 LIMIT 1',
+        [athleteId],
+      );
+      const weightKg = Number(profile.rows[0]?.weight_kg);
       if (replace) {
         await removeWeekRoutines(client, athleteId, weekStart);
       }
@@ -662,6 +780,8 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
         for (const [position, exercise] of day.exercises.entries()) {
           const exerciseId = `exercise-${randomUUID()}`;
           const note = typeof exercise.note === 'string' && exercise.note.trim() ? exercise.note.trim() : '';
+          const predicted = await predictLoad(client, athleteId, exercise.name, weightKg);
+          const suggested = predicted ?? exercise.load_kg ?? 0;
           await client.query(
             `INSERT INTO exercise
               (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
@@ -671,7 +791,7 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
               exerciseId,
               exercise.name,
               `${exercise.sets} × ${exercise.reps}`,
-              exercise.load_kg ?? 0,
+              suggested,
               exercise.sets,
               exercise.rest_seconds,
               day.name,
@@ -698,6 +818,48 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   } finally {
     client.release();
   }
+});
+
+app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, reply) => {
+  const exerciseId = textValue(request.params?.id);
+  if (!exerciseId) return reply.code(400).send({ error: 'Falta el ejercicio a actualizar' });
+
+  const profile = await ensureUser(request.userId);
+  if (profile.role !== 'coach') {
+    return reply.code(403).send({ error: 'Solo un coach puede editar ejercicios' });
+  }
+
+  const sets = Number(request.body?.sets);
+  const rest = Number(request.body?.rest);
+  const reps = normalizedReps(request.body?.reps);
+  const suggested = normalizedLoad(request.body?.suggested);
+  const overload =
+    request.body?.overload === null || request.body?.overload === undefined
+      ? null
+      : normalizedLoad(request.body.overload);
+
+  if (!Number.isInteger(sets) || sets < 1 || sets > 20) {
+    return reply.code(400).send({ error: 'Las series deben ser un entero entre 1 y 20' });
+  }
+  if (!Number.isInteger(rest) || rest < 20 || rest > 600) {
+    return reply.code(400).send({ error: 'El descanso debe estar entre 20 y 600 segundos' });
+  }
+  if (suggested === null) {
+    return reply.code(400).send({ error: 'La carga sugerida no es válida' });
+  }
+  if (request.body?.overload !== null && request.body?.overload !== undefined && overload === null) {
+    return reply.code(400).send({ error: 'El overload no es válido' });
+  }
+
+  const result = await pool.query(
+    `UPDATE exercise
+     SET scheme = $1, suggested = $2, sets = $3, rest = $4, overload = $5
+     WHERE id = $6
+     RETURNING *`,
+    [`${sets} \u00d7 ${reps}`, suggested, sets, rest, overload, exerciseId],
+  );
+  if (!result.rows[0]) return reply.code(404).send({ error: 'No encontramos ese ejercicio' });
+  return reply.send({ ok: true, exercise: result.rows[0] });
 });
 
 app.post('/v1/routines/:id/complete', { preHandler: authenticate }, async (request, reply) => {

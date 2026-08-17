@@ -1,7 +1,7 @@
 import { useAuth } from '@clerk/expo';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { assignTemplate } from '@/api/client';
 import { Avatar } from '@/components/Avatar';
@@ -186,7 +186,7 @@ function ClientWeekSheet({ client, onClose }: { client: Client | null; onClose: 
           ) : (
             <View style={styles.days}>
               {days.map((day) => (
-                <DayRow key={day.id} day={day} />
+                <DayRow key={day.id} day={day} client={client} weekStart={weekStart} />
               ))}
             </View>
           )}
@@ -236,6 +236,10 @@ function AddRoutineSheet({
       onClose();
     } catch (error: unknown) {
       console.warn('[Coachlander] No se pudo asignar la plantilla', error);
+      Alert.alert(
+        'No pudimos asignar la rutina',
+        error instanceof Error ? error.message : 'Probá nuevamente.',
+      );
     } finally {
       setAssigningId(null);
     }
@@ -316,7 +320,7 @@ function ClientWeekHeader({
   );
 }
 
-function DayRow({ day }: { day: ClientRoutineDay }) {
+function DayRow({ day, client, weekStart }: { day: ClientRoutineDay; client: Client; weekStart: string }) {
   const badge = day.completed ? color.lime : color.violet;
   const shortName = day.name.replace(/^.*·\s*/, '');
   return (
@@ -333,7 +337,12 @@ function DayRow({ day }: { day: ClientRoutineDay }) {
       meta={`${day.exerciseCount} ejercicios · ${day.totalSets} series · ${day.estimatedMinutes} min`}
       trailing={day.completed ? 'HECHO' : `DÍA ${day.day}`}
       trailingTone={badge}
-      onPress={() => router.push(`/rutina/${day.id}`)}
+      onPress={() =>
+        router.push({
+          pathname: '/rutina/[id]',
+          params: { id: day.id, clientId: client.id, weekStart },
+        })
+      }
     />
   );
 }
