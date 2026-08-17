@@ -145,12 +145,24 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const currentEmail = remoteData.user?.email?.trim().toLowerCase() ?? '';
-    if (EPHEMERAL_TEST_EMAIL && currentEmail === EPHEMERAL_TEST_EMAIL) {
-      await deleteEphemeralTestAccount(getToken);
-    }
-
     try {
-      await clerkSignOut();
+      if (EPHEMERAL_TEST_EMAIL && currentEmail === EPHEMERAL_TEST_EMAIL) {
+        try {
+          await deleteEphemeralTestAccount(getToken);
+        } catch (error) {
+          // Never leave someone trapped in the temporary account because its
+          // disposable-data cleanup failed. The next registration resets it.
+          console.warn('[Coachlander] No se pudo borrar la cuenta temporal', error);
+        }
+      }
+
+      try {
+        await clerkSignOut();
+      } catch (error) {
+        // Clerk can reject a local sign-out after the temporary user was
+        // deleted remotely. Clear the local app state either way.
+        console.warn('[Coachlander] Clerk no pudo cerrar la sesi\u00f3n', error);
+      }
     } finally {
       setRemoteData(emptyRemoteData);
       setRemoteStatus('idle');

@@ -32,7 +32,7 @@ const CHOICES: { role: Role; eyebrow: string; title: string; blurb: string }[] =
 
 /** 11 · ¿Alumno o entrenador? — step 1 of 3 */
 export default function RolePicker() {
-  const { draft, patchDraft, remoteStatus, retryRemoteData } = useApp();
+  const { draft, patchDraft, remoteStatus, retryRemoteData, signOut } = useApp();
 
   if (remoteStatus === 'error') {
     return (
@@ -51,12 +51,16 @@ export default function RolePicker() {
   }
 
   const next = () => router.push(draft.role === 'coach' ? '/datos' : '/codigo');
+  const leaveOnboarding = () => {
+    void signOut().finally(() => router.replace('/bienvenida'));
+  };
 
   return (
     <Screen scroll gap={22}>
       <View style={styles.stepper}>
-        <BackButton />
+        <BackButton onPress={leaveOnboarding} />
         <StepProgress step={1} total={3} />
+        <View style={styles.headerSpacer} />
       </View>
 
       <Heading title="¿Cómo vas a usar Coachlander?" subtitle="Podés cambiarlo después desde tu perfil." />
@@ -91,12 +95,14 @@ export default function RolePicker() {
       </View>
 
       <Button label="Continuar" onPress={next} style={styles.cta} />
+      <Button label="Salir de esta prueba" variant="ghost" size="sm" onPress={leaveOnboarding} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerSpacer: { width: 34, height: 34 },
   choices: { gap: 12 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cardTitle: { fontSize: 27 },

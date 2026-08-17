@@ -259,7 +259,11 @@ app.delete('/v1/test-accounts/ephemeral', { preHandler: authenticate }, async (r
 
   try {
     await removeUserData(request.userId);
-    await clerk.users.deleteUser(request.userId);
+    // Keep the Clerk user alive until the native client has ended its
+    // session. Deleting it here first makes Clerk reject `signOut()` and
+    // leaves the device with a stale local session. The next temporary
+    // registration uses the reset endpoint above, which deletes and
+    // recreates this disposable Clerk account from scratch.
     return reply.send({ ok: true });
   } catch (error) {
     request.log.error({ error, userId: request.userId }, 'Ephemeral test account deletion failed');
