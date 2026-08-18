@@ -48,6 +48,7 @@ const bootstrapTables = [
   'import_line',
   'app_meta',
   'set_log',
+  'client_exercise_goal',
 ];
 const orderBy = {
   coach: 'id',
@@ -142,6 +143,19 @@ async function readBootstrap(userId) {
       const result = await pool.query(
         `SELECT id, routine_id, exercise_id, set_index, load, reps, logged_at
          FROM set_log WHERE clerk_user_id = $1 ORDER BY logged_at DESC, id DESC`,
+        [userId],
+      );
+      tables[table] = result.rows;
+      continue;
+    }
+
+    if (table === 'client_exercise_goal') {
+      const result = await pool.query(
+        `SELECT goal.*
+         FROM client_exercise_goal goal
+         JOIN client c ON c.id = goal.client_id
+         WHERE c.clerk_user_id = $1
+         ORDER BY goal.exercise_key`,
         [userId],
       );
       tables[table] = result.rows;

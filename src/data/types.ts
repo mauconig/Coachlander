@@ -18,6 +18,8 @@ export type Exercise = {
   rest: number;
   /** muscle groups, shown as the eyebrow on the detail screen */
   focus: string;
+  /** canonical detail groups resolved from stored groups, focus and name */
+  muscleGroups: string[];
   cues: string;
   /** week-over-week auto progression in kg */
   overload: number | null;
@@ -31,6 +33,49 @@ export type Exercise = {
     reps: number[];
     note: string;
   };
+};
+
+export type AthleteProgressExercise = Exercise & {
+  key: string;
+  sessions: number;
+  lastDate: string;
+};
+
+export type AthleteProgressMuscle = {
+  key: string;
+  label: string;
+  exercises: AthleteProgressExercise[];
+};
+
+export type AthleteExerciseGoal = {
+  baselineDate: string;
+  baselineLoadKg: number | null;
+  baselineReps: number;
+  targetDate: string;
+  targetLoadKg: number | null;
+  targetReps: number;
+  note?: string;
+};
+
+export type AthleteProgressPoint = {
+  date: string;
+  label: string;
+  value: number | null;
+  loadKg: number | null;
+  reps: number | null;
+  meetsTarget: boolean;
+};
+
+export type AthleteExerciseProgress = {
+  exercise: {
+    key: string;
+    name: string;
+    targetReps: number;
+    progressionMetric: 'load' | 'reps' | 'seconds';
+    bodyweight: boolean;
+  };
+  points: AthleteProgressPoint[];
+  goal: AthleteExerciseGoal | null;
 };
 
 export type Routine = {

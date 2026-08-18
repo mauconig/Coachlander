@@ -73,6 +73,7 @@ function blankDraft(focus: string): DraftExercise {
     work: 30,
     rest: 90,
     focus,
+    muscleGroups: [],
     cues: '',
     overload: null,
     loadSource: 'coach',

@@ -1,203 +1,292 @@
 import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 
+import { AthleteProgressChart } from '@/components/AthleteProgressChart';
 import { Card } from '@/components/Card';
 import { Chip, ChipGroup } from '@/components/Chip';
 import { Screen } from '@/components/Screen';
+import { Sheet } from '@/components/Sheet';
 import { Txt } from '@/components/Txt';
-import {
-  getOverloadRows,
-  getProgressExercises,
-  getProgressSummary,
-  getRecentSetLogs,
-  getWeeklyVolume,
-} from '@/db/queries';
+import type { AthleteProgressRange } from '@/db/queries';
+import { getAthleteExerciseProgress, getOverloadRows, getProgressMuscles } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { num } from '@/lib/format';
 import { useApp } from '@/state/AppState';
-import { color, radius } from '@/theme/tokens';
+import { color } from '@/theme/tokens';
 
 const RANGES = ['6 SEMANAS', '3 MESES', 'TODO'] as const;
 type Range = (typeof RANGES)[number];
+const DISPLAY_MODES = ['PROGRESO REAL', 'COMPARAR OBJETIVO'] as const;
+type DisplayMode = (typeof DISPLAY_MODES)[number];
 
-/** Progressive overload: one logical exercise, current snapshot and audit trail. */
 export default function Progress() {
   const { unit } = useApp();
   const [range, setRange] = useState<Range>('6 SEMANAS');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedMuscleKey, setSelectedMuscleKey] = useState<string | null>(null);
+  const [selectedExerciseKey, setSelectedExerciseKey] = useState<string | null>(null);
+  const [exerciseSheetOpen, setExerciseSheetOpen] = useState(false);
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('PROGRESO REAL');
 
-  const exercises = useQuery(getProgressExercises);
-  const exerciseId = selectedId ?? exercises[0]?.id ?? '';
-  const exercise = exercises.find((item) => item.id === exerciseId) ?? exercises[0];
-  const overloadRows = useQuery((db) => getOverloadRows(db, exerciseId), [exerciseId]);
-  const weeklyVolume = useQuery(getWeeklyVolume);
-  const summary = useQuery(getProgressSummary);
-  const logged = useQuery((db) => getRecentSetLogs(db, exerciseId, 4), [exerciseId]);
+  const muscles = useQuery(getProgressMuscles);
+  const selectedMuscle = muscles.find((muscle) => muscle.key === selectedMuscleKey) ?? null;
+  const exerciseOptions = selectedMuscle?.exercises ?? [];
+  const selectedExercise = exerciseOptions.find((exercise) => exercise.key === selectedExerciseKey) ?? null;
+  const progress = useQuery(
+    (data) => selectedExercise ? getAthleteExerciseProgress(data, selectedExercise.key, range as AthleteProgressRange) : null,
+    [selectedExercise?.key, range],
+  );
+  const overloadRows = useQuery(
+    (data) => selectedExercise ? getOverloadRows(data, selectedExercise.id) : [],
+    [selectedExercise?.id],
+  );
 
-  if (!exercise) {
-    return (
-      <Screen scroll gap={16}>
-        <View style={styles.heading}>
-          <Txt variant="eyebrow">PROGRESO</Txt>
-          <Txt variant="h2">Todavía no hay progreso</Txt>
-        </View>
-        <View style={styles.emptyState}>
-          <Txt variant="bodyLg" tone={color.textMuted} center>
-            Cuando tengas una rutina y registres tu primer set, tus avances van a aparecer acá.
-          </Txt>
-        </View>
-      </Screen>
-    );
-  }
+  const selectMuscle = (key: string) => {
+    setSelectedMuscleKey(key);
+    setSelectedExerciseKey(null);
+    setDisplayMode('PROGRESO REAL');
+  };
 
-  const isLoadMetric = exercise.progressionMetric === 'load';
+  if (!muscles.length) return <ScreenEmpty />;
+
   const latestRow = overloadRows[overloadRows.length - 1];
-  const peak = Math.max(...weeklyVolume, 1);
-  const topValue = isLoadMetric ? num(exercise.suggested || summary.topLoad) : String(latestRow?.nextReps ?? exercise.targetReps);
+  const latestPoint = progress ? progress.points[progress.points.length - 1] ?? null : null;
+  const bestValue = progress?.points.reduce<number | null>((best, point) => {
+    if (point.value === null) return best;
+    return best === null ? point.value : Math.max(best, point.value);
+  }, null) ?? null;
 
   return (
     <Screen scroll gap={16}>
       <View style={styles.heading}>
         <Txt variant="eyebrow">PROGRESO</Txt>
-        <Txt variant="h2">{exercise.name}</Txt>
+        <Txt variant="h2">Seguí tu evolución</Txt>
       </View>
 
-      <View collapsable={false} style={styles.switcherViewport}>
-        <ScrollView
-          horizontal
-          style={styles.switcherScroll}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.switcher}
-        >
-          {exercises.map((item) => (
+      <View style={styles.selectorBlock}>
+        <Txt variant="eyebrow">MÚSCULO</Txt>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          {muscles.map((muscle) => (
             <Chip
-              key={item.id}
-              label={item.name}
-              mono={false}
-              selected={item.id === exerciseId}
+              key={muscle.key}
+              label={muscle.label}
+              selected={muscle.key === selectedMuscleKey}
               tone="violet"
-              onPress={() => setSelectedId(item.id)}
+              mono={false}
+              onPress={() => selectMuscle(muscle.key)}
             />
           ))}
         </ScrollView>
       </View>
 
-      <ChipGroup options={RANGES} value={range} onChange={setRange} />
-
-      <Card tone="violet" padding={18} style={styles.top}>
-        <View style={styles.topLeft}>
-          <Txt variant="label" tone={color.onViolet}>
-            {isLoadMetric ? 'PRÓXIMA CARGA' : exercise.progressionMetric === 'seconds' ? 'PRÓXIMO OBJETIVO' : 'PRÓXIMAS REPS'}
-          </Txt>
-          <Txt variant="hero" style={styles.topValue}>
-            {topValue}
-            <Txt variant="h5">{isLoadMetric ? ` ${unit}` : exercise.progressionMetric === 'seconds' ? ' s' : ' reps'}</Txt>
-          </Txt>
-        </View>
-        <View style={styles.topRight}>
-          <Txt variant="label" tone={color.onViolet}>{summary.windowLabel}</Txt>
-          <Txt variant="h4" tone={color.lime}>{summary.growth}</Txt>
-        </View>
-      </Card>
-
-      <Card tone="muted" padding={16} gap={6}>
-        <View style={styles.auditHeader}>
-          <Txt variant="eyebrow">ORIGEN DE LA RECOMENDACIÓN</Txt>
-          <Txt variant="labelTight" tone={exercise.loadSource === 'ai' ? color.violet : color.lime}>
-            {exercise.loadSource === 'ai' ? 'IA' : 'ENTRENADOR'}
-          </Txt>
-        </View>
-        <Txt variant="bodyStrong">{exercise.loadReason || 'Carga definida en el plan.'}</Txt>
-        <Txt variant="meta" tone={color.textMuted}>
-          {isLoadMetric ? 'La próxima carga se calcula con la última sesión completada.' : 'El objetivo progresa en repeticiones o segundos, no en kilos.'}
-        </Txt>
-      </Card>
-
-      <View style={styles.table}>
-        <View style={[styles.tableRow, styles.tableHead]}>
-          <Txt variant="metaSm" style={styles.colSet}>SERIE</Txt>
-          <Txt variant="metaSm" style={styles.colFlex}>ÚLTIMA</Txt>
-          <Txt variant="metaSm" style={styles.colFlex}>PRÓXIMA</Txt>
-          <Txt variant="metaSm" style={styles.colDelta}>Δ</Txt>
-        </View>
-
-        {overloadRows.length === 0 ? (
-          <View style={styles.tableRow}>
-            <Txt variant="meta" tone={color.textFaint}>Todavía no hay historial de este ejercicio.</Txt>
-          </View>
-        ) : null}
-
-        {overloadRows.map((row, index) => {
-          const delta = isLoadMetric ? row.nextLoad - row.lastLoad : row.nextReps - row.lastReps;
-          const lastLabel = isLoadMetric
-            ? `${num(row.lastLoad)} ${unit} × ${row.lastReps}`
-            : `${row.lastReps}${exercise.progressionMetric === 'seconds' ? ' s' : ' reps'}`;
-          const nextLabel = isLoadMetric
-            ? `${num(row.nextLoad)} ${unit} × ${row.nextReps}`
-            : `${row.nextReps}${exercise.progressionMetric === 'seconds' ? ' s' : ' reps'}`;
-          return (
-            <View key={row.set} style={[styles.tableRow, index < overloadRows.length - 1 && styles.tableDivider]}>
-              <Txt variant="labelTight" tone={color.violet} style={styles.colSet}>{String(row.set).padStart(2, '0')}</Txt>
-              <Txt variant="bodyStrong" tone={color.textMuted} style={styles.colFlex}>{lastLabel}</Txt>
-              <Txt variant="bodyStrong" style={styles.colFlex}>{nextLabel}</Txt>
-              <Txt variant="labelTight" tone={delta > 0 ? color.lime : color.textMuted} style={[styles.colDelta, styles.deltaText]}>
-                {delta > 0 ? `+${isLoadMetric ? num(delta) : delta}` : '='}
+      <View style={styles.selectorBlock}>
+        <Txt variant="eyebrow">EJERCICIO</Txt>
+        <Card
+          tone={selectedMuscle ? 'surface' : 'muted'}
+          padding={15}
+          onPress={selectedMuscle ? () => setExerciseSheetOpen(true) : undefined}
+          style={!selectedMuscle ? styles.disabledField : undefined}
+        >
+          <View style={styles.exerciseField}>
+            <View style={styles.exerciseFieldText}>
+              <Txt variant="bodyStrong" numberOfLines={1}>
+                {selectedExercise?.name ?? (selectedMuscle ? 'Elegí un ejercicio trabajado' : 'Primero elegí un músculo')}
+              </Txt>
+              <Txt variant="meta" tone={color.textMuted}>
+                {selectedExercise ? `${selectedExercise.sessions} sesiones · última ${selectedExercise.lastDate}` : selectedMuscle ? `${exerciseOptions.length} ejercicios con historial` : 'El selector se habilita después'}
               </Txt>
             </View>
-          );
-        })}
+            <Txt variant="labelTight" tone={selectedMuscle ? color.lime : color.textFaint}>CAMBIAR</Txt>
+          </View>
+        </Card>
       </View>
 
-      <Card padding={18} gap={8}>
-        <Txt variant="eyebrow">{`VOLUMEN POR SEMANA · ${unit.toUpperCase()}`}</Txt>
-        <View style={styles.chart}>
-          {weeklyVolume.map((value, index) => {
-            const last = index === weeklyVolume.length - 1;
-            const recent = index >= weeklyVolume.length - 3;
-            return <View key={index} style={[styles.bar, { height: `${Math.round((value / peak) * 100)}%`, backgroundColor: last ? color.lime : recent ? color.violet : color.border }]} />;
-          })}
-        </View>
-        <View style={styles.chartAxis}>
-          {weeklyVolume.map((_, index) => <Txt key={index} variant="metaSm" tone={color.textFaint}>{`S${index + 1}`}</Txt>)}
-        </View>
-      </Card>
-
-      {logged.length ? (
-        <Card tone="muted" padding={18} gap={10}>
-          <Txt variant="eyebrow">REGISTRADO EN ESTE TELÉFONO</Txt>
-          {logged.map((entry) => (
-            <View key={entry.id} style={styles.logRow}>
-              <Txt variant="labelTight" tone={color.violet}>{`SERIE ${entry.setIndex + 1}`}</Txt>
-              <Txt variant="bodyStrong">{`${entry.load ? `${num(entry.load)} ${unit}` : 'peso corporal'} × ${entry.reps}`}</Txt>
-            </View>
-          ))}
+      {!selectedExercise ? (
+        <Card tone="muted" padding={22} style={styles.waitingCard}>
+          <Txt variant="bodyLg" tone={color.textMuted} center>
+            {selectedMuscle ? 'Elegí un ejercicio para ver tu progreso.' : 'Elegí un músculo para comenzar.'}
+          </Txt>
         </Card>
-      ) : null}
+      ) : (
+        <>
+          <ChipGroup options={RANGES} value={range} onChange={setRange} />
+
+          {progress?.points.length ? (
+            <>
+              <Card tone="violet" padding={18} style={styles.summaryCard}>
+                <View style={styles.summaryColumn}>
+                  <Txt variant="label" tone={color.onViolet}>MEJOR MARCA</Txt>
+                  <Txt variant="hero" style={styles.summaryValue}>
+                    {bestValue === null ? '—' : formatValue(bestValue, progress, unit)}
+                  </Txt>
+                </View>
+                <View style={styles.summaryColumnRight}>
+                  <Txt variant="label" tone={color.onViolet}>ÚLTIMA SESIÓN</Txt>
+                  <Txt variant="h4" tone={color.lime}>{latestPoint?.date ?? '—'}</Txt>
+                  <Txt variant="meta" tone={color.onViolet}>{progress.exercise.targetReps ? `${progress.exercise.targetReps} objetivo` : 'sin objetivo de reps'}</Txt>
+                </View>
+              </Card>
+
+              <Card padding={16} gap={12}>
+                <View style={styles.chartHeader}>
+                  <View style={styles.chartTitle}>
+                    <Txt variant="eyebrow">PROGRESO POR SESIÓN</Txt>
+                    <Txt variant="meta" tone={color.textMuted}>Una marca por cada rutina completada</Txt>
+                  </View>
+                  {progress.goal ? (
+                    <ChipGroup options={DISPLAY_MODES} value={displayMode} onChange={setDisplayMode} tone="violet" mono={false} />
+                  ) : null}
+                </View>
+                <AthleteProgressChart
+                  progress={progress}
+                  unit={unit}
+                  compareGoal={displayMode === 'COMPARAR OBJETIVO'}
+                />
+                {!progress.goal ? <Txt variant="meta" tone={color.textMuted}>Tu entrenador todavía no definió un objetivo para este ejercicio.</Txt> : null}
+              </Card>
+
+              <RecentSessions progress={progress} unit={unit} />
+
+              <Card tone="muted" padding={16} gap={7}>
+                <View style={styles.auditHeader}>
+                  <Txt variant="eyebrow">PRÓXIMA RECOMENDACIÓN</Txt>
+                  <Txt variant="labelTight" tone={selectedExercise.loadSource === 'ai' ? color.violetSoft : color.lime}>
+                    {selectedExercise.loadSource === 'ai' ? 'IA' : 'ENTRENADOR'}
+                  </Txt>
+                </View>
+                <Txt variant="bodyStrong">{recommendationLabel(selectedExercise, latestRow, unit, progress)}</Txt>
+                <Txt variant="meta" tone={color.textMuted}>{selectedExercise.loadReason || 'Carga definida en el plan.'}</Txt>
+              </Card>
+            </>
+          ) : (
+            <Card tone="muted" padding={22} style={styles.waitingCard}>
+              <Txt variant="bodyLg" tone={color.textMuted} center>
+                No hay sesiones de este ejercicio dentro del rango elegido.
+              </Txt>
+            </Card>
+          )}
+        </>
+      )}
+
+      <ExercisePickerSheet
+        visible={exerciseSheetOpen}
+        muscleName={selectedMuscle?.label ?? ''}
+        exercises={exerciseOptions}
+        selectedKey={selectedExerciseKey}
+        onClose={() => setExerciseSheetOpen(false)}
+        onSelect={(key) => {
+          setSelectedExerciseKey(key);
+          setDisplayMode('PROGRESO REAL');
+          setExerciseSheetOpen(false);
+        }}
+      />
     </Screen>
   );
 }
 
+function ScreenEmpty() {
+  return (
+    <Screen scroll gap={16}>
+      <View style={styles.heading}>
+        <Txt variant="eyebrow">PROGRESO</Txt>
+        <Txt variant="h2">Todavía no hay progreso</Txt>
+      </View>
+      <View style={styles.emptyState}>
+        <Txt variant="bodyLg" tone={color.textMuted} center>
+          Cuando completes una rutina y registres tu primer set, acá vas a poder elegir un músculo y seguir tus avances.
+        </Txt>
+      </View>
+    </Screen>
+  );
+}
+
+function RecentSessions({ progress, unit }: { progress: NonNullable<ReturnType<typeof getAthleteExerciseProgress>>; unit: 'kg' | 'lb' }) {
+  return (
+    <Card tone="muted" padding={16} gap={4}>
+      <Txt variant="eyebrow">ÚLTIMAS SESIONES</Txt>
+      {progress.points.slice().reverse().slice(0, 5).map((point, index) => (
+        <View key={`${point.date}-${index}`} style={styles.sessionRow}>
+          <View>
+            <Txt variant="bodyStrong">{point.date}</Txt>
+            <Txt variant="meta" tone={color.textMuted}>{point.reps ? `${point.reps} reps reales` : 'Sin repeticiones registradas'}</Txt>
+          </View>
+          <Txt variant="labelTight" tone={point.value === null ? color.textMuted : color.lime}>
+            {point.value === null ? 'NO ALCANZÓ' : formatValue(point.value, progress, unit)}
+          </Txt>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
+function ExercisePickerSheet({
+  visible,
+  muscleName,
+  exercises,
+  selectedKey,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  muscleName: string;
+  exercises: Array<{ key: string; name: string; sessions: number; lastDate: string }>;
+  selectedKey: string | null;
+  onClose: () => void;
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <Sheet visible={visible} onClose={onClose} eyebrow="EJERCICIOS TRABAJADOS" title={muscleName}>
+      <ScrollView style={styles.sheetList} contentContainerStyle={styles.sheetContent}>
+        {exercises.map((exercise) => (
+          <Card key={exercise.key} tone={exercise.key === selectedKey ? 'violet' : 'muted'} padding={14} onPress={() => onSelect(exercise.key)}>
+            <View style={styles.exerciseOption}>
+              <View style={styles.exerciseOptionText}>
+                <Txt variant="bodyStrong" numberOfLines={1}>{exercise.name}</Txt>
+                <Txt variant="meta" tone={exercise.key === selectedKey ? color.onViolet : color.textMuted}>{`${exercise.sessions} sesiones · última ${exercise.lastDate}`}</Txt>
+              </View>
+              {exercise.key === selectedKey ? <Txt variant="labelTight" tone={color.lime}>ELEGIDO</Txt> : null}
+            </View>
+          </Card>
+        ))}
+        {!exercises.length ? <Txt variant="body" tone={color.textMuted}>Todavía no trabajaste ejercicios de este músculo.</Txt> : null}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+function formatValue(value: number, progress: NonNullable<ReturnType<typeof getAthleteExerciseProgress>>, unit: 'kg' | 'lb') {
+  if (progress.exercise.progressionMetric === 'load' && !progress.exercise.bodyweight) return `${num(value)} ${unit}`;
+  return `${num(value)} ${progress.exercise.progressionMetric === 'seconds' ? 's' : 'reps'}`;
+}
+
+function recommendationLabel(
+  exercise: { progressionMetric: 'load' | 'reps' | 'seconds'; suggested: number; targetReps: number },
+  latestRow: { nextLoad: number; nextReps: number } | undefined,
+  unit: 'kg' | 'lb',
+  progress: NonNullable<ReturnType<typeof getAthleteExerciseProgress>>,
+) {
+  if (exercise.progressionMetric === 'load' && !progress.exercise.bodyweight) return `Próxima carga: ${num(latestRow?.nextLoad ?? exercise.suggested)} ${unit}`;
+  return `Próximo objetivo: ${latestRow?.nextReps ?? exercise.targetReps} ${exercise.progressionMetric === 'seconds' ? 'segundos' : 'reps'}`;
+}
+
 const styles = StyleSheet.create({
   heading: { gap: 4 },
-  switcherViewport: { height: 37, minHeight: 37, maxHeight: 37, overflow: 'hidden' },
-  switcherScroll: { height: 37, minHeight: 37, maxHeight: 37, flexGrow: 0, flexShrink: 0 },
-  switcher: { height: 37, gap: 8, paddingRight: 8, alignItems: 'flex-start' },
-  top: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  topLeft: { gap: 3 },
-  topValue: { fontSize: 40, lineHeight: 40 },
-  topRight: { alignItems: 'flex-end', gap: 3 },
+  selectorBlock: { gap: 8 },
+  chips: { gap: 8, paddingRight: 8 },
+  disabledField: { opacity: 0.55 },
+  exerciseField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  exerciseFieldText: { flex: 1, gap: 4 },
+  waitingCard: { minHeight: 150, justifyContent: 'center' },
+  summaryCard: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  summaryColumn: { gap: 4, flex: 1 },
+  summaryColumnRight: { alignItems: 'flex-end', gap: 4 },
+  summaryValue: { fontSize: 36, lineHeight: 38 },
+  chartHeader: { gap: 10 },
+  chartTitle: { gap: 3 },
   auditHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  table: { backgroundColor: color.surface, borderWidth: 1, borderColor: color.border, borderRadius: radius.xxl, overflow: 'hidden' },
-  tableRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 15, paddingHorizontal: 16 },
-  tableHead: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: color.border },
-  tableDivider: { borderBottomWidth: 1, borderBottomColor: color.hairline },
-  colSet: { width: 40 },
-  colFlex: { flex: 1 },
-  colDelta: { width: 54 },
-  deltaText: { textAlign: 'right' },
-  chart: { flexDirection: 'row', alignItems: 'flex-end', gap: 9, height: 92 },
-  bar: { flex: 1, borderRadius: 6, minHeight: 6 },
-  chartAxis: { flexDirection: 'row', justifyContent: 'space-between' },
-  logRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sessionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: color.hairline },
+  sheetList: { maxHeight: 430 },
+  sheetContent: { gap: 9, paddingBottom: 4 },
+  exerciseOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  exerciseOptionText: { flex: 1, gap: 4 },
   emptyState: { minHeight: 420, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
 });
