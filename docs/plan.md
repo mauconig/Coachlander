@@ -11,7 +11,7 @@ relevantes para las **dos cuentas permanentes** de `docs/cuentas.md`:
 No se toca la cuenta temporal (`ejemplo@gmail.com`), ni los datos existentes de
 `mauricioconigliaro1@gmail.com`.
 
-## Estado actual
+## Estado inicial (historico)
 
 Todos los usuarios ya existen en `app_user` (se crean solos al iniciar sesión con Clerk).
 Solo `mauricioconigliaro1@gmail.com` tiene contenido: 25 ejercicios, 4 rutinas, 13 set_logs.
@@ -135,3 +135,17 @@ de ambos emails consultando `app_user`, para evitar usar IDs hardcodeados.
 2. `curl https://coachlander.147-93-180-120.sslip.io/healthz` → `database: ok`.
 3. Confirmar que `app_user` de `ejemplo@gmail.com` y los datos de
    `mauricioconigliaro1@gmail.com` no cambiaron.
+
+## Fixture de estadisticas
+
+El fixture reproducible vive en `backend/db/seed-coach-statistics.sql`. Se ejecuta
+en la VPS con:
+
+```bash
+docker exec -i coachlander-db psql -v ON_ERROR_STOP=1 -U coachlander -d coachlander \
+  < /tmp/coachlander-seed-coach-statistics.sql
+```
+
+El script es idempotente, conserva las rutinas de Mauricio, el atleta de prueba y
+la cuenta temporal, y administra solamente las filas demo de estadisticas y las
+filas `Test`/`Test2` identificadas durante la prueba.

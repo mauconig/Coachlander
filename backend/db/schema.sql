@@ -221,6 +221,28 @@ CREATE TABLE IF NOT EXISTS set_log (
 CREATE INDEX IF NOT EXISTS idx_set_log_user_exercise
   ON set_log (clerk_user_id, exercise_id, logged_at);
 
+CREATE TABLE IF NOT EXISTS client_exercise_goal (
+  client_id TEXT NOT NULL REFERENCES client(id) ON DELETE CASCADE,
+  exercise_key TEXT NOT NULL,
+  exercise_name TEXT NOT NULL,
+  baseline_date DATE NOT NULL,
+  baseline_load_kg DOUBLE PRECISION,
+  baseline_reps INTEGER NOT NULL CHECK (baseline_reps > 0 AND baseline_reps <= 100),
+  target_date DATE NOT NULL,
+  target_load_kg DOUBLE PRECISION,
+  target_reps INTEGER NOT NULL CHECK (target_reps > 0 AND target_reps <= 100),
+  note TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (client_id, exercise_key),
+  CHECK (target_date >= baseline_date),
+  CHECK (baseline_load_kg IS NULL OR baseline_load_kg >= 0),
+  CHECK (target_load_kg IS NULL OR target_load_kg >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_exercise_goal_client
+  ON client_exercise_goal (client_id, exercise_key);
+
 CREATE TABLE IF NOT EXISTS load_reference (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

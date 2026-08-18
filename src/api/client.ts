@@ -128,6 +128,181 @@ export function getBootstrap(tokenProvider: TokenProvider) {
   return request<RemoteBootstrap>(tokenProvider, '/v1/bootstrap');
 }
 
+export type CoachHistorySession = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  date: string;
+  name: string;
+  minutes: number;
+  sets: number;
+  volumeKg: number;
+  completion: number;
+};
+
+export type CoachHistorySet = {
+  setIndex: number;
+  load: number | null;
+  reps: number;
+};
+
+export type CoachHistoryExercise = {
+  id: string;
+  name: string;
+  plannedSets: number;
+  scheme: string;
+  sets: CoachHistorySet[];
+};
+
+export type CoachHistoryDetail = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  date: string;
+  name: string;
+  minutes: number;
+  exercises: CoachHistoryExercise[];
+};
+
+export type CoachStatistics = {
+  scope: {
+    clientId: string | null;
+    from: string;
+    to: string;
+  };
+  summary: {
+    clientCount: number;
+    activeNow: number;
+    scheduledRoutines: number;
+    completedRoutines: number;
+    completionRate: number;
+    sessions: number;
+    totalMinutes: number;
+    volumeKg: number;
+  };
+  weeklyVolume: Array<{ weekStart: string; label: string; volumeKg: number }>;
+  activity: {
+    granularity: 'day' | 'week';
+    buckets: Array<{ start: string; label: string; sessions: number; minutes: number }>;
+  };
+  heatmap: Array<{ date: string; sessions: number; minutes: number }>;
+  recentSessions: CoachHistorySession[];
+};
+
+export type CoachExerciseLibraryItem = {
+  key: string;
+  name: string;
+  sessions: number;
+  lastDate: string;
+  lastLoad: number | null;
+  lastReps: number | null;
+};
+
+export type CoachExerciseGoal = {
+  baselineDate: string;
+  baselineLoadKg: number | null;
+  baselineReps: number;
+  targetDate: string;
+  targetLoadKg: number | null;
+  targetReps: number;
+  note?: string;
+};
+
+export type CoachExerciseProgress = {
+  exercise: {
+    key: string;
+    name: string;
+    targetReps: number;
+    bodyweight: boolean;
+  };
+  points: Array<{
+    bucketStart: string;
+    label: string;
+    loadKg: number | null;
+    reps: number | null;
+    meetsTarget: boolean;
+  }>;
+  goal: CoachExerciseGoal | null;
+};
+
+export type CoachHistoryPage = {
+  items: CoachHistorySession[];
+  total: number;
+  hasMore: boolean;
+};
+
+function coachStatsQuery(params: { clientId: string | null; from: string; to: string; limit?: number; offset?: number }) {
+  const query = new URLSearchParams({
+    clientId: params.clientId ?? 'all',
+    from: params.from,
+    to: params.to,
+  });
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
+  return query.toString();
+}
+
+export function getCoachStatistics(
+  tokenProvider: TokenProvider,
+  params: { clientId: string | null; from: string; to: string },
+) {
+  return request<CoachStatistics>(tokenProvider, `/v1/coach/statistics?${coachStatsQuery(params)}`);
+}
+
+export function getCoachExerciseLibrary(
+  tokenProvider: TokenProvider,
+  params: { clientId: string; from: string; to: string },
+) {
+  return request<{ items: CoachExerciseLibraryItem[] }>(
+    tokenProvider,
+    `/v1/coach/statistics/exercises?${coachStatsQuery(params)}`,
+  );
+}
+
+export function getCoachExerciseProgress(
+  tokenProvider: TokenProvider,
+  params: { clientId: string; exerciseKey: string; from: string; to: string },
+) {
+  const query = new URLSearchParams(coachStatsQuery(params));
+  query.set('exerciseKey', params.exerciseKey);
+  return request<CoachExerciseProgress>(tokenProvider, `/v1/coach/statistics/exercises/progress?${query.toString()}`);
+}
+
+export function saveCoachExerciseGoal(
+  tokenProvider: TokenProvider,
+  input: {
+    clientId: string;
+    exerciseKey: string;
+    exerciseName: string;
+    baselineDate: string;
+    baselineLoadKg: number | null;
+    baselineReps: number;
+    targetDate: string;
+    targetLoadKg: number | null;
+    targetReps: number;
+    note?: string;
+  },
+) {
+  return request<{ ok: true; goal: CoachExerciseGoal }>(tokenProvider, '/v1/coach/statistics/exercises/goal', {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
+}
+
+export function getCoachStatisticsHistory(
+  tokenProvider: TokenProvider,
+  params: { clientId: string | null; from: string; to: string; limit?: number; offset?: number },
+) {
+  return request<CoachHistoryPage>(tokenProvider, `/v1/coach/statistics/history?${coachStatsQuery(params)}`);
+}
+
+export function getCoachStatisticsHistoryDetail(tokenProvider: TokenProvider, routineId: string) {
+  return request<CoachHistoryDetail>(
+    tokenProvider,
+    `/v1/coach/statistics/history/${encodeURIComponent(routineId)}`,
+  );
+}
+
 export function updateProfile(
   tokenProvider: TokenProvider,
   profile: {

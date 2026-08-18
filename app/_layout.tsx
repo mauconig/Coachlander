@@ -85,6 +85,8 @@ export default function RootLayout() {
                 <Stack.Screen name="index" options={{ animation: 'none' }} />
                 <Stack.Screen name="(athlete)" options={{ animation: 'none' }} />
                 <Stack.Screen name="(coach)" options={{ animation: 'none' }} />
+                <Stack.Screen name="historial-estadisticas" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="progreso-alumno" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="sesion" options={{ animation: 'slide_from_bottom' }} />
               </Stack>
             </AppStateProvider>
