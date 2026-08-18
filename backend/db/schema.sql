@@ -36,6 +36,9 @@ CREATE TABLE IF NOT EXISTS exercise (
   last_note TEXT
 );
 
+ALTER TABLE exercise
+  ADD COLUMN IF NOT EXISTS muscle_groups TEXT[] NOT NULL DEFAULT '{}';
+
 CREATE TABLE IF NOT EXISTS routine (
   id TEXT PRIMARY KEY,
   plan_id TEXT,

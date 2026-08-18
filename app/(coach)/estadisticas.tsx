@@ -3,15 +3,15 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
-import type { CoachHistorySession, CoachStatistics } from '@/api/client';
+import type { CoachHeatmapItem, CoachHistorySession, CoachStatistics, CoachWeekdayActivityItem } from '@/api/client';
 import { getCoachStatistics } from '@/api/client';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
-import { CoachActivityCharts } from '@/components/CoachActivityCharts';
-import { CoachActivityHeatmap } from '@/components/CoachActivityHeatmap';
 import { CoachHistoryDetailSheet } from '@/components/CoachHistoryDetailSheet';
 import { CoachHistoryRow } from '@/components/CoachHistoryRow';
+import { CoachMuscleBalance } from '@/components/CoachMuscleBalance';
 import { CoachStatsFilters } from '@/components/CoachStatsFilters';
+import { CoachWeekdayActivityChart } from '@/components/CoachWeekdayActivityChart';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Txt } from '@/components/Txt';
@@ -63,8 +63,6 @@ export default function Stats() {
       pathname: '/historial-estadisticas',
       params: {
         clientId: clientId ?? 'all',
-        from: range.from,
-        to: range.to,
       },
     });
   };
@@ -143,6 +141,7 @@ function StatsContent({
   onSelectSession: (session: CoachHistorySession) => void;
 }) {
   const { summary, recentSessions } = stats;
+  const weekdayActivity = stats.weekdayActivity ?? fallbackWeekdayActivity(stats);
 
   return (
     <>
@@ -152,7 +151,7 @@ function StatsContent({
       </View>
 
       <View style={styles.grid}>
-        <StatTile value={String(summary.completedRoutines)} label="SESIONES CUMPLIDAS" valueTone={color.lime} />
+        <StatTile value={String(summary.completedRoutines)} label="SESIONES REALIZADAS" valueTone={color.lime} />
         <StatTile value={hoursMinutes(summary.totalMinutes)} label="TIEMPO ESTIMADO" />
         <StatTile value={`${summary.completionRate} %`} label="CUMPLIMIENTO" />
       </View>
@@ -161,8 +160,8 @@ function StatsContent({
         {`${summary.scheduledRoutines} rutinas programadas en el período`}
       </Txt>
 
-      <CoachActivityCharts activity={stats.activity} />
-      <CoachActivityHeatmap from={stats.scope.from} to={stats.scope.to} items={stats.heatmap} />
+      <CoachMuscleBalance balance={stats.muscleBalance} />
+      <CoachWeekdayActivityChart activity={weekdayActivity} />
 
       {hasSelectedClient ? (
         <Button label="VER PROGRESO POR EJERCICIO" variant="outline" onPress={onOpenExerciseProgress} />
@@ -194,6 +193,54 @@ function StatsContent({
       </View>
     </>
   );
+}
+
+const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+function fallbackWeekdayActivity(stats: CoachStatistics): { items: CoachWeekdayActivityItem[] } {
+  const heatmap = (stats as CoachStatistics & { heatmap?: CoachStatistics['heatmap'] | CoachHeatmapItem[] }).heatmap;
+  const items = Array.isArray(heatmap) ? heatmap : heatmap?.items ?? [];
+  const occurrences = Array.from({ length: 7 }, () => 0);
+  const sessions = Array.from({ length: 7 }, () => 0);
+  const activeWeeks = Array.from({ length: 7 }, () => new Set<string>());
+
+  for (let date = stats.scope.from; date <= stats.scope.to; date = addIsoDays(date, 1)) {
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+    occurrences[weekday === 0 ? 6 : weekday - 1] += 1;
+  }
+
+  for (const item of items) {
+    if (!item.sessions) continue;
+    const date = item.date;
+    const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+    const index = day === 0 ? 6 : day - 1;
+    sessions[index] += item.sessions;
+    activeWeeks[index].add(isoWeekStart(date));
+  }
+
+  return {
+    items: Array.from({ length: 7 }, (_, index) => ({
+      weekday: (index + 1) as CoachWeekdayActivityItem['weekday'],
+      label: WEEKDAY_LABELS[index],
+      sessions: sessions[index],
+      averagePerWeek: occurrences[index] ? Math.round((sessions[index] / occurrences[index]) * 100) / 100 : 0,
+      activeWeeks: activeWeeks[index].size,
+      percentageOfWeeks: occurrences[index] ? Math.round((activeWeeks[index].size / occurrences[index]) * 100) : 0,
+    })),
+  };
+}
+
+function addIsoDays(value: string, days: number) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function isoWeekStart(value: string) {
+  const date = new Date(`${value}T00:00:00Z`);
+  const day = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() - (day === 0 ? 6 : day - 1));
+  return date.toISOString().slice(0, 10);
 }
 
 const styles = StyleSheet.create({

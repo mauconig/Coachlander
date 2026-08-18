@@ -12,6 +12,37 @@ export function todayRange(): StatsRange {
   return { from: isoDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1)), to: isoDate(new Date()) };
 }
 
+export function currentMonthKey(now = new Date()): string {
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
+}
+
+export function monthRange(month: string): StatsRange {
+  const [yearValue, monthValue] = month.split('-').map(Number);
+  const year = Number.isFinite(yearValue) ? yearValue : new Date().getFullYear();
+  const monthIndex = Number.isFinite(monthValue) && monthValue >= 1 && monthValue <= 12 ? monthValue - 1 : new Date().getMonth();
+  return {
+    from: `${year}-${pad(monthIndex + 1)}-01`,
+    to: isoDate(new Date(year, monthIndex + 1, 0)),
+  };
+}
+
+export function shiftMonth(month: string, offset: number): string {
+  const [yearValue, monthValue] = month.split('-').map(Number);
+  const date = new Date(
+    Number.isFinite(yearValue) ? yearValue : new Date().getFullYear(),
+    Number.isFinite(monthValue) ? monthValue - 1 : new Date().getMonth(),
+    1,
+  );
+  date.setMonth(date.getMonth() + offset);
+  return currentMonthKey(date);
+}
+
+export function displayMonth(month: string): string {
+  const [yearValue, monthValue] = month.split('-').map(Number);
+  const date = new Date(yearValue, monthValue - 1, 1);
+  return date.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }).toUpperCase();
+}
+
 export function presetRange(preset: Exclude<StatsPreset, 'custom'>, now = new Date()): StatsRange {
   const to = isoDate(now);
   if (preset === 'week') {

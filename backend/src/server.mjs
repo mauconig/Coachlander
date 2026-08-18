@@ -231,6 +231,38 @@ function readStatsQuery(request, reply) {
   return { clientId, from, to };
 }
 
+function validIsoMonth(value) {
+  if (!/^\d{4}-\d{2}$/.test(value)) return false;
+  const year = Number(value.slice(0, 4));
+  const month = Number(value.slice(5, 7));
+  return year >= 2000 && month >= 1 && month <= 12;
+}
+
+function monthRange(month) {
+  const year = Number(month.slice(0, 4));
+  const monthNumber = Number(month.slice(5, 7));
+  return {
+    from: `${month}-01`,
+    to: isoDateValue(new Date(Date.UTC(year, monthNumber, 0))),
+  };
+}
+
+function readHistoryQuery(request, reply) {
+  const query = request.query ?? {};
+  const clientId = query.clientId && query.clientId !== 'all' ? textValue(query.clientId) : null;
+  const requestedMonth = textValue(query.month);
+  if (requestedMonth) {
+    if (!validIsoMonth(requestedMonth)) {
+      reply.code(400).send({ error: 'El mes solicitado no es válido' });
+      return null;
+    }
+    return { clientId, ...monthRange(requestedMonth) };
+  }
+
+  const range = readStatsQuery(request, reply);
+  return range ? { clientId, from: range.from, to: range.to } : null;
+}
+
 function readStatsExerciseQuery(request, reply) {
   const params = readStatsQuery(request, reply);
   if (!params) return null;
@@ -316,7 +348,7 @@ async function fetchCoachHistory({ clientId, from, to, limit, offset }) {
         SELECT sl.routine_id, SUM(COALESCE(sl.load, 0) * sl.reps)::double precision AS volume_kg
         FROM set_log sl
         JOIN scoped_routines sr ON sr.id = sl.routine_id
-        WHERE sl.logged_at::date BETWEEN $2::date AND $3::date
+        WHERE sr.completed_at IS NOT NULL
         GROUP BY sl.routine_id
       ),
       completed_total AS (
@@ -450,57 +482,68 @@ function statsBucketLabel(bucketStart) {
   return `${day}/${month}`;
 }
 
+function addIsoDays(value, days) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoDateValue(date);
+}
+
+function statsWeekWindows(from, to) {
+  const windows = [];
+  for (let cursor = isoWeekStart(from); cursor <= to; cursor = addIsoDays(cursor, 7)) {
+    const weekEnd = addIsoDays(cursor, 6);
+    const includedFrom = cursor < from ? from : cursor;
+    const includedTo = weekEnd > to ? to : weekEnd;
+    windows.push({
+      weekStart: cursor,
+      daysIncluded: statsRangeDays(includedFrom, includedTo),
+    });
+  }
+  return windows;
+}
+
+function normalizedWeeklyValue(value, daysIncluded) {
+  return daysIncluded ? Math.round((value / daysIncluded) * 7 * 100) / 100 : 0;
+}
+
 function repsFromScheme(scheme) {
   const match = String(scheme ?? '').match(/[x×]\s*(\d+)/i);
   return match ? Number(match[1]) : 8;
 }
 
 async function fetchCoachActivity({ clientId, from, to }) {
-  const granularity = statsGranularity(from, to);
-  const bucketExpression = granularity === 'day'
-    ? 'completed_at::date'
-    : 'date_trunc(\'week\', completed_at)::date';
-  const seriesStart = granularity === 'day'
-    ? '$2::date'
-    : 'date_trunc(\'week\', $2::date)::date';
-  const seriesEnd = granularity === 'day'
-    ? '$3::date'
-    : 'date_trunc(\'week\', $3::date)::date';
-  const seriesStep = granularity === 'day' ? '1 day' : '7 days';
-
   const result = await pool.query(
-    `WITH scoped_routines AS (${coachScopedRoutines}),
-      buckets AS (
-        SELECT generate_series(${seriesStart}, ${seriesEnd}, INTERVAL '${seriesStep}')::date AS bucket_start
-      ),
-      activity AS (
-        SELECT
-          ${bucketExpression} AS bucket_start,
-          COUNT(*)::integer AS sessions,
-          COALESCE(SUM(estimated_minutes), 0)::integer AS minutes
-        FROM scoped_routines
-        WHERE completed_at IS NOT NULL
-          AND completed_at::date BETWEEN $2::date AND $3::date
-        GROUP BY ${bucketExpression}
-      )
-      SELECT
-        buckets.bucket_start,
-        COALESCE(activity.sessions, 0)::integer AS sessions,
-        COALESCE(activity.minutes, 0)::integer AS minutes
-      FROM buckets
-      LEFT JOIN activity ON activity.bucket_start = buckets.bucket_start
-      ORDER BY buckets.bucket_start`,
+    `SELECT
+       date_trunc('week', completed_at)::date AS week_start,
+       COUNT(*)::integer AS sessions,
+       COALESCE(SUM(estimated_minutes), 0)::integer AS minutes
+     FROM (${coachScopedRoutines}) scoped_routines
+     WHERE completed_at IS NOT NULL
+       AND completed_at::date BETWEEN $2::date AND $3::date
+     GROUP BY date_trunc('week', completed_at)::date
+     ORDER BY week_start`,
     [clientId, from, to],
   );
 
+  const byWeek = new Map(result.rows.map((row) => [databaseDateValue(row.week_start), {
+    sessions: Number(row.sessions) || 0,
+    minutes: Number(row.minutes) || 0,
+  }]));
+
   return {
-    granularity,
-    buckets: result.rows.map((row) => ({
-      start: databaseDateValue(row.bucket_start),
-      label: statsBucketLabel(databaseDateValue(row.bucket_start)),
-      sessions: Number(row.sessions) || 0,
-      minutes: Number(row.minutes) || 0,
-    })),
+    granularity: 'week',
+    buckets: statsWeekWindows(from, to).map((window) => {
+      const totals = byWeek.get(window.weekStart) ?? { sessions: 0, minutes: 0 };
+      return {
+        start: window.weekStart,
+        label: statsBucketLabel(window.weekStart),
+        sessions: totals.sessions,
+        minutes: totals.minutes,
+        daysIncluded: window.daysIncluded,
+        normalizedSessions: normalizedWeeklyValue(totals.sessions, window.daysIncluded),
+        normalizedMinutes: normalizedWeeklyValue(totals.minutes, window.daysIncluded),
+      };
+    }),
   };
 }
 
@@ -534,6 +577,178 @@ async function fetchCoachHeatmap({ clientId, from, to }) {
     sessions: Number(row.sessions) || 0,
     minutes: Number(row.minutes) || 0,
   }));
+}
+
+const WEEKDAY_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+
+function rangeWeekdayOccurrences(from, to) {
+  const occurrences = Array.from({ length: 7 }, () => 0);
+  for (let date = from; date <= to; date = addIsoDays(date, 1)) {
+    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
+    occurrences[weekday === 0 ? 6 : weekday - 1] += 1;
+  }
+  return occurrences;
+}
+
+async function fetchCoachWeekdayActivity({ clientId, from, to }) {
+  const result = await pool.query(
+    `SELECT
+       EXTRACT(ISODOW FROM completed_at::date)::integer AS weekday,
+       COUNT(*)::integer AS sessions,
+       COUNT(DISTINCT date_trunc('week', completed_at)::date)::integer AS active_weeks
+     FROM (${coachScopedRoutines}) scoped_routines
+     WHERE completed_at IS NOT NULL
+       AND completed_at::date BETWEEN $2::date AND $3::date
+     GROUP BY EXTRACT(ISODOW FROM completed_at::date)
+     ORDER BY weekday`,
+    [clientId, from, to],
+  );
+
+  const occurrences = rangeWeekdayOccurrences(from, to);
+  const totals = new Map(result.rows.map((row) => [Number(row.weekday), {
+    sessions: Number(row.sessions) || 0,
+    activeWeeks: Number(row.active_weeks) || 0,
+  }]));
+
+  return {
+    items: Array.from({ length: 7 }, (_, index) => {
+      const weekday = index + 1;
+      const current = totals.get(weekday) ?? { sessions: 0, activeWeeks: 0 };
+      const representedWeeks = occurrences[index];
+      return {
+        weekday,
+        label: WEEKDAY_LABELS[index],
+        sessions: current.sessions,
+        averagePerWeek: representedWeeks ? Math.round((current.sessions / representedWeeks) * 100) / 100 : 0,
+        activeWeeks: current.activeWeeks,
+        percentageOfWeeks: representedWeeks ? Math.round((current.activeWeeks / representedWeeks) * 100) : 0,
+      };
+    }),
+  };
+}
+
+const MUSCLE_REGION_LABELS = {
+  pecho: 'Pecho',
+  espalda: 'Espalda',
+  espalda_baja: 'Espalda baja',
+  hombros: 'Hombros',
+  brazos: 'Brazos',
+  gluteos: 'Glúteos',
+  cuadriceps: 'Cuádriceps',
+  cadena_posterior: 'Cadena posterior',
+  pantorrillas: 'Pantorrillas',
+  core: 'Core',
+  otros: 'Otros',
+};
+
+const MUSCLE_REGION_KEYS = Object.keys(MUSCLE_REGION_LABELS);
+
+function resolveMuscleGroups(name, focus, storedGroups) {
+  const stored = Array.isArray(storedGroups)
+    ? storedGroups.filter((group) => MUSCLE_REGION_KEYS.includes(group))
+    : [];
+  if (stored.length) return [...new Set(stored)];
+
+  const text = normalizeName(`${name} ${focus}`);
+  const groups = [];
+  if (/pecho|pectoral|press banca|press pecho|empuje/.test(text)) groups.push('pecho');
+  if (/espalda|remo|dorsal|tiron|pull/.test(text)) groups.push('espalda');
+  if (/espalda baja|lumbar|lumbares|erector/.test(text)) groups.push('espalda_baja');
+  if (/hombro|deltoid|press militar|empuje/.test(text)) groups.push('hombros');
+  if (/brazo|biceps|triceps|curl|extension/.test(text)) groups.push('brazos');
+  if (/gluteo|glute|hip thrust|puente|sentadilla|zancada/.test(text)) groups.push('gluteos');
+  if (/cuadriceps|pierna|sentadilla|zancada|prensa|extension de pierna/.test(text)) groups.push('cuadriceps');
+  if (/posterior|isquio|femoral|peso muerto|rumano/.test(text)) groups.push('cadena_posterior');
+  if (/pantorrilla|gemelo|talon/.test(text)) groups.push('pantorrillas');
+  if (/core|plancha|abdomen|oblicuo/.test(text)) groups.push('core');
+  return groups.length ? [...new Set(groups)] : ['otros'];
+}
+
+async function fetchCoachMuscleBalance({ clientId, from, to }) {
+  const result = await pool.query(
+    `SELECT
+       r.id AS routine_id,
+       r.completed_at::date AS training_date,
+       re.exercise_id,
+       e.name,
+       e.focus,
+       e.muscle_groups,
+       sl.id AS set_log_id
+     FROM routine r
+     JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
+     LEFT JOIN routine_exercise re ON re.routine_id = r.id
+     LEFT JOIN exercise e ON e.id = re.exercise_id
+     LEFT JOIN set_log sl
+       ON sl.routine_id = r.id
+      AND sl.exercise_id = re.exercise_id
+     WHERE ($1::text IS NULL OR c.id = $1)
+       AND r.completed_at IS NOT NULL
+       AND r.completed_at::date BETWEEN $2::date AND $3::date
+     ORDER BY r.completed_at::date, r.id, re.position`,
+    [clientId, from, to],
+  );
+
+  const sessions = new Map();
+  for (const row of result.rows) {
+    const session = sessions.get(row.routine_id) ?? {
+      date: databaseDateValue(row.training_date),
+      groups: new Set(),
+      hasLogs: false,
+    };
+    if (row.set_log_id) {
+      session.hasLogs = true;
+      resolveMuscleGroups(row.name, row.focus, row.muscle_groups).forEach((group) => session.groups.add(group));
+    }
+    sessions.set(row.routine_id, session);
+  }
+
+  for (const session of sessions.values()) {
+    if (!session.hasLogs || !session.groups.size) session.groups.add('otros');
+  }
+
+  const weekly = statsWeekWindows(from, to).map((window) => ({
+    weekStart: window.weekStart,
+    daysIncluded: window.daysIncluded,
+    sessions: 0,
+    normalizedSessions: 0,
+    groups: new Map(),
+  }));
+  const windowFor = (date) => weekly.find((window) => date >= window.weekStart && date <= addIsoDays(window.weekStart, 6));
+
+  for (const session of sessions.values()) {
+    const window = windowFor(session.date);
+    if (!window) continue;
+    window.sessions += 1;
+    for (const group of session.groups) window.groups.set(group, (window.groups.get(group) ?? 0) + 1);
+  }
+
+  for (const window of weekly) window.normalizedSessions = normalizedWeeklyValue(window.sessions, window.daysIncluded);
+
+  const activeWeeks = weekly.filter((window) => window.sessions > 0);
+  const items = MUSCLE_REGION_KEYS.map((key) => {
+    const sessionsCount = activeWeeks.reduce((total, week) => total + (week.groups.get(key) ?? 0), 0);
+    const percentage = activeWeeks.length
+      ? Math.round(activeWeeks.reduce((total, week) => total + ((week.groups.get(key) ?? 0) / week.sessions) * 100, 0) / activeWeeks.length)
+      : 0;
+    return {
+      key,
+      label: MUSCLE_REGION_LABELS[key],
+      sessions: sessionsCount,
+      sessionsPerWeek: Math.round((sessionsCount / Math.max(weekly.length, 1)) * 100) / 100,
+      percentage,
+    };
+  }).sort((a, b) => b.sessions - a.sessions || a.label.localeCompare(b.label));
+
+  return {
+    totalSessions: sessions.size,
+    weeks: weekly.map(({ weekStart, daysIncluded, sessions: count, normalizedSessions }) => ({
+      weekStart,
+      daysIncluded,
+      sessions: count,
+      normalizedSessions,
+    })),
+    items,
+  };
 }
 
 async function fetchCoachExerciseLibrary({ clientId, from, to }) {
@@ -684,7 +899,7 @@ async function fetchCoachExerciseProgress({ clientId, exerciseKey, from, to }) {
 }
 
 async function fetchCoachStatistics({ clientId, from, to }) {
-  const [clientCountResult, activeResult, summaryResult, volumeResult, weeklyResult, history, activity, heatmap] = await Promise.all([
+  const [clientCountResult, activeResult, summaryResult, volumeResult, weeklyResult, history, activity, heatmap, weekdayActivity, muscleBalance] = await Promise.all([
     pool.query('SELECT COUNT(*)::integer AS count FROM client WHERE ($1::text IS NULL OR id = $1)', [clientId]),
     pool.query(
       `SELECT COUNT(*)::integer AS count
@@ -696,11 +911,11 @@ async function fetchCoachStatistics({ clientId, from, to }) {
     pool.query(
       `WITH scoped_routines AS (${coachScopedRoutines})
        SELECT
-         COUNT(*)::integer AS scheduled,
-         COUNT(*) FILTER (WHERE completed_at IS NOT NULL)::integer AS completed,
-         COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
-       FROM scoped_routines
-       WHERE scheduled_date BETWEEN $2::date AND $3::date`,
+         COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date)::integer AS scheduled,
+         COUNT(*) FILTER (WHERE completed_at IS NOT NULL AND completed_at::date BETWEEN $2::date AND $3::date)::integer AS completed,
+         COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date AND completed_at IS NOT NULL AND completed_at::date BETWEEN $2::date AND $3::date)::integer AS completed_scheduled,
+         COALESCE(SUM(CASE WHEN completed_at IS NOT NULL AND completed_at::date BETWEEN $2::date AND $3::date THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
+       FROM scoped_routines`,
       [clientId, from, to],
     ),
     pool.query(
@@ -709,30 +924,35 @@ async function fetchCoachStatistics({ clientId, from, to }) {
        JOIN routine r ON r.id = sl.routine_id
        JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
        WHERE ($1::text IS NULL OR c.id = $1)
-         AND sl.logged_at::date BETWEEN $2::date AND $3::date`,
+         AND r.completed_at IS NOT NULL
+         AND r.completed_at::date BETWEEN $2::date AND $3::date`,
       [clientId, from, to],
     ),
     pool.query(
       `SELECT
-         date_trunc('week', sl.logged_at)::date AS week_start,
+         date_trunc('week', r.completed_at)::date AS week_start,
          SUM(COALESCE(sl.load, 0) * sl.reps)::double precision AS volume_kg
        FROM set_log sl
        JOIN routine r ON r.id = sl.routine_id
        JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
        WHERE ($1::text IS NULL OR c.id = $1)
-         AND sl.logged_at::date BETWEEN $2::date AND $3::date
-       GROUP BY date_trunc('week', sl.logged_at)::date
+         AND r.completed_at IS NOT NULL
+         AND r.completed_at::date BETWEEN $2::date AND $3::date
+       GROUP BY date_trunc('week', r.completed_at)::date
        ORDER BY week_start`,
       [clientId, from, to],
     ),
     fetchCoachHistory({ clientId, from, to, limit: 5, offset: 0 }),
     fetchCoachActivity({ clientId, from, to }),
     fetchCoachHeatmap({ clientId, from, to }),
+    fetchCoachWeekdayActivity({ clientId, from, to }),
+    fetchCoachMuscleBalance({ clientId, from, to }),
   ]);
 
   const summaryRow = summaryResult.rows[0] ?? {};
   const scheduledRoutines = Number(summaryRow.scheduled) || 0;
   const completedRoutines = Number(summaryRow.completed) || 0;
+  const completedScheduledRoutines = Number(summaryRow.completed_scheduled) || 0;
   const weeklyVolume = weeklyResult.rows.map((row) => {
     const weekStart = databaseDateValue(row.week_start);
     const [, month, day] = weekStart.split('-');
@@ -750,14 +970,16 @@ async function fetchCoachStatistics({ clientId, from, to }) {
       activeNow: Number(activeResult.rows[0]?.count) || 0,
       scheduledRoutines,
       completedRoutines,
-      completionRate: scheduledRoutines ? Math.round((completedRoutines / scheduledRoutines) * 100) : 0,
+      completionRate: scheduledRoutines ? Math.round((completedScheduledRoutines / scheduledRoutines) * 100) : 0,
       sessions: completedRoutines,
       totalMinutes: Number(summaryRow.minutes) || 0,
       volumeKg: Number(volumeResult.rows[0]?.volume_kg) || 0,
     },
     weeklyVolume,
     activity,
-    heatmap,
+    heatmap: { items: heatmap, weeks: activity.buckets },
+    weekdayActivity,
+    muscleBalance,
     recentSessions: history.items,
   };
 }
@@ -865,14 +1087,23 @@ app.put('/v1/coach/statistics/exercises/goal', { preHandler: authenticate }, asy
 app.get('/v1/coach/statistics/history', { preHandler: authenticate }, async (request, reply) => {
   const profile = await requireCoach(request, reply);
   if (!profile) return;
-  const params = readStatsQuery(request, reply);
+  const params = readHistoryQuery(request, reply);
   if (!params) return;
   if (!(await validateCoachClient(params.clientId, reply))) return;
 
   const query = request.query ?? {};
   const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit, 10) || 25));
   const offset = Math.max(0, Number.parseInt(query.offset, 10) || 0);
-  return fetchCoachHistory({ ...params, limit, offset });
+  const [page, activity, heatmap] = await Promise.all([
+    fetchCoachHistory({ ...params, limit, offset }),
+    fetchCoachActivity(params),
+    fetchCoachHeatmap(params),
+  ]);
+  return {
+    ...page,
+    weeklyAverages: activity.buckets,
+    calendarActivity: { items: heatmap, weeks: activity.buckets },
+  };
 });
 
 app.get('/v1/coach/statistics/history/:id', { preHandler: authenticate }, async (request, reply) => {

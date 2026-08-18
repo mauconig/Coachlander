@@ -114,6 +114,16 @@ ON CONFLICT (id) DO UPDATE SET
   overload = EXCLUDED.overload,
   last_note = EXCLUDED.last_note;
 
+UPDATE exercise
+SET muscle_groups = CASE id
+  WHEN 'stats-demo-exercise-1' THEN ARRAY['cuadriceps', 'gluteos']
+  WHEN 'stats-demo-exercise-2' THEN ARRAY['pecho', 'hombros']
+  WHEN 'stats-demo-exercise-3' THEN ARRAY['espalda', 'brazos']
+  WHEN 'stats-demo-exercise-4' THEN ARRAY['cadena_posterior', 'gluteos', 'espalda_baja']
+  WHEN 'stats-demo-exercise-5' THEN ARRAY['core']
+END
+WHERE id LIKE 'stats-demo-exercise-%';
+
 WITH demo_clients AS (
   SELECT
     c.id,

@@ -1,67 +1,62 @@
 import { useAuth } from '@clerk/expo';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 
 import { getCoachStatisticsHistory, type CoachHistoryPage, type CoachHistorySession } from '@/api/client';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { CoachHistoryDetailSheet } from '@/components/CoachHistoryDetailSheet';
+import { CoachHistoryCalendar } from '@/components/CoachHistoryCalendar';
 import { CoachHistoryRow } from '@/components/CoachHistoryRow';
 import { Screen } from '@/components/Screen';
 import { TopBar } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
 import { getClients } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
-import { displayDate, todayRange, type StatsRange } from '@/lib/stats';
+import { currentMonthKey, displayDate, shiftMonth } from '@/lib/stats';
 import { color } from '@/theme/tokens';
 
 const PAGE_SIZE = 25;
-const EMPTY_PAGE: CoachHistoryPage = { items: [], total: 0, hasMore: false };
+const EMPTY_PAGE: CoachHistoryPage = {
+  items: [],
+  total: 0,
+  hasMore: false,
+  weeklyAverages: [],
+  calendarActivity: { items: [], weeks: [] },
+};
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
-}
-
-function validIsoDate(value: string | undefined): value is string {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 export default function CoachTrainingHistory() {
   const { getToken } = useAuth();
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
-  const params = useLocalSearchParams<{ clientId?: string; from?: string; to?: string }>();
+  const params = useLocalSearchParams<{ clientId?: string }>();
   const clients = useQuery(getClients);
-  const defaults = useMemo(() => todayRange(), []);
   const rawClientId = firstParam(params.clientId);
   const clientId = rawClientId && rawClientId !== 'all' ? rawClientId : null;
-  const requestedFrom = firstParam(params.from);
-  const requestedTo = firstParam(params.to);
-  const parsedFrom = validIsoDate(requestedFrom) ? requestedFrom : defaults.from;
-  const parsedTo = validIsoDate(requestedTo) ? requestedTo : defaults.to;
-  const range: StatsRange = parsedFrom <= parsedTo
-    ? { from: parsedFrom, to: parsedTo }
-    : defaults;
   const selectedClient = clients.find((client) => client.id === clientId);
+  const [month, setMonth] = useState(() => currentMonthKey());
   const [page, setPage] = useState<CoachHistoryPage>(EMPTY_PAGE);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const [selectedSession, setSelectedSession] = useState<CoachHistorySession | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
     setPage(EMPTY_PAGE);
+    setSelectedDate(null);
     void getCoachStatisticsHistory(() => getTokenRef.current(), {
       clientId,
-      from: range.from,
-      to: range.to,
+      month,
       limit: PAGE_SIZE,
       offset: 0,
     })
@@ -77,7 +72,11 @@ export default function CoachTrainingHistory() {
     return () => {
       cancelled = true;
     };
-  }, [clientId, range.from, range.to, retry]);
+  }, [clientId, month, retry]);
+
+  const changeMonth = useCallback((offset: number) => {
+    setMonth((current) => shiftMonth(current, offset));
+  }, []);
 
   const goBack = () => {
     if (router.canGoBack()) {
@@ -94,8 +93,7 @@ export default function CoachTrainingHistory() {
     try {
       const nextPage = await getCoachStatisticsHistory(() => getTokenRef.current(), {
         clientId,
-        from: range.from,
-        to: range.to,
+        month,
         limit: PAGE_SIZE,
         offset: page.items.length,
       });
@@ -111,6 +109,9 @@ export default function CoachTrainingHistory() {
     }
   };
 
+  const selectedDaySessions = selectedDate ? page.items.filter((session) => session.date === selectedDate) : [];
+  const selectedDayActivity = selectedDate ? page.calendarActivity.items.find((item) => item.date === selectedDate) : null;
+
   return (
     <>
       <Screen scroll gap={15}>
@@ -119,7 +120,7 @@ export default function CoachTrainingHistory() {
       <View style={styles.heading}>
         <Txt variant="h2">Historial de entrenamientos</Txt>
         <Txt variant="body" tone={color.textMuted}>
-          {`${selectedClient?.name ?? 'Todos los alumnos'} · ${displayDate(range.from)} — ${displayDate(range.to)}`}
+          {selectedClient?.name ?? 'Todos los alumnos'}
         </Txt>
       </View>
 
@@ -135,26 +136,45 @@ export default function CoachTrainingHistory() {
           <ActivityIndicator color={color.lime} />
           <Txt variant="meta" tone={color.textMuted}>Cargando historial…</Txt>
         </Card>
-      ) : page.items.length ? (
+      ) : (
         <View style={styles.list}>
-          {page.items.map((session, index) => (
-            <CoachHistoryRow
-              key={session.id}
-              session={session}
-              showClient={!clientId}
-              latest={index === 0}
-              onPress={() => setSelectedSession(session)}
-            />
-          ))}
+          <CoachHistoryCalendar
+            month={month}
+            activityItems={page.calendarActivity.items}
+            weeklyAverages={page.weeklyAverages}
+            selectedDate={selectedDate}
+            onSelectDate={setSelectedDate}
+            onMonthChange={changeMonth}
+          />
+          {selectedDate ? (
+            <View style={styles.daySessions}>
+              <Txt variant="eyebrow">{`ENTRENAMIENTOS DEL ${displayDate(selectedDate)}`}</Txt>
+              {selectedDayActivity ? <Txt variant="meta" tone={color.textMuted}>{`${selectedDayActivity.sessions} sesiones realizadas · ${selectedDayActivity.minutes} min estimados`}</Txt> : null}
+              {selectedDaySessions.length ? selectedDaySessions.map((session, index) => (
+                <CoachHistoryRow
+                  key={session.id}
+                  session={session}
+                  showClient={!clientId}
+                  latest={index === 0}
+                  onPress={() => setSelectedSession(session)}
+                />
+              )) : (
+                <Card tone="muted" padding={16}>
+                  <Txt variant="body" tone={color.textMuted} center>No hay entrenamientos cargados para este día.</Txt>
+                </Card>
+              )}
+            </View>
+          ) : null}
+          {!page.items.length ? (
+            <Card tone="muted" padding={18}>
+              <Txt variant="body" tone={color.textMuted} center>No hay entrenamientos completados en este mes.</Txt>
+            </Card>
+          ) : null}
           {page.hasMore ? (
             <Button label={loadingMore ? 'Cargando…' : 'Cargar más'} variant="outline" onPress={() => void loadMore()} disabled={loadingMore} />
           ) : null}
           <Txt variant="meta" tone={color.textFaint} center>{`${page.items.length} de ${page.total} entrenamientos`}</Txt>
         </View>
-      ) : (
-        <Card tone="muted" padding={18}>
-          <Txt variant="body" tone={color.textMuted} center>No hay entrenamientos completados en este período.</Txt>
-        </Card>
       )}
       </Screen>
       <CoachHistoryDetailSheet
@@ -171,4 +191,5 @@ const styles = StyleSheet.create({
   heading: { gap: 6 },
   loading: { alignItems: 'center' },
   list: { gap: 9 },
+  daySessions: { gap: 9 },
 });

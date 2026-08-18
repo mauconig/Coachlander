@@ -182,11 +182,60 @@ export type CoachStatistics = {
   };
   weeklyVolume: Array<{ weekStart: string; label: string; volumeKg: number }>;
   activity: {
-    granularity: 'day' | 'week';
-    buckets: Array<{ start: string; label: string; sessions: number; minutes: number }>;
+    granularity: 'week';
+    buckets: CoachWeeklyActivity[];
   };
-  heatmap: Array<{ date: string; sessions: number; minutes: number }>;
+  heatmap: {
+    items: CoachHeatmapItem[];
+    weeks: CoachWeeklyActivity[];
+  };
+  weekdayActivity?: {
+    items: CoachWeekdayActivityItem[];
+  };
+  muscleBalance: CoachMuscleBalance;
   recentSessions: CoachHistorySession[];
+};
+
+export type CoachHeatmapItem = {
+  date: string;
+  sessions: number;
+  minutes: number;
+};
+
+export type CoachWeeklyActivity = {
+  start: string;
+  label: string;
+  sessions: number;
+  minutes: number;
+  daysIncluded: number;
+  normalizedSessions: number;
+  normalizedMinutes: number;
+};
+
+export type CoachWeekdayActivityItem = {
+  weekday: 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  label: string;
+  sessions: number;
+  averagePerWeek: number;
+  activeWeeks: number;
+  percentageOfWeeks: number;
+};
+
+export type CoachMuscleBalance = {
+  totalSessions: number;
+  weeks: Array<{
+    weekStart: string;
+    daysIncluded: number;
+    sessions: number;
+    normalizedSessions: number;
+  }>;
+  items: Array<{
+    key: string;
+    label: string;
+    sessions: number;
+    sessionsPerWeek: number;
+    percentage: number;
+  }>;
 };
 
 export type CoachExerciseLibraryItem = {
@@ -229,6 +278,11 @@ export type CoachHistoryPage = {
   items: CoachHistorySession[];
   total: number;
   hasMore: boolean;
+  weeklyAverages: CoachWeeklyActivity[];
+  calendarActivity: {
+    items: CoachHeatmapItem[];
+    weeks: CoachWeeklyActivity[];
+  };
 };
 
 function coachStatsQuery(params: { clientId: string | null; from: string; to: string; limit?: number; offset?: number }) {
@@ -291,9 +345,17 @@ export function saveCoachExerciseGoal(
 
 export function getCoachStatisticsHistory(
   tokenProvider: TokenProvider,
-  params: { clientId: string | null; from: string; to: string; limit?: number; offset?: number },
+  params: { clientId: string | null; month: string; limit?: number; offset?: number },
 ) {
-  return request<CoachHistoryPage>(tokenProvider, `/v1/coach/statistics/history?${coachStatsQuery(params)}`);
+  const [year, monthValue] = params.month.split('-').map(Number);
+  const monthEnd = new Date(year, monthValue, 0);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const from = `${year}-${pad(monthValue)}-01`;
+  const to = `${year}-${pad(monthValue)}-${pad(monthEnd.getDate())}`;
+  const query = new URLSearchParams({ clientId: params.clientId ?? 'all', month: params.month, from, to });
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.offset !== undefined) query.set('offset', String(params.offset));
+  return request<CoachHistoryPage>(tokenProvider, `/v1/coach/statistics/history?${query.toString()}`);
 }
 
 export function getCoachStatisticsHistoryDetail(tokenProvider: TokenProvider, routineId: string) {
