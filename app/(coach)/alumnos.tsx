@@ -334,7 +334,7 @@ function DayRow({ day, client, weekStart }: { day: ClientRoutineDay; client: Cli
       }
       title={shortName}
       titleTone={day.completed ? color.textMuted : color.text}
-      meta={`${day.exerciseCount} ejercicios · ${day.totalSets} series · ${day.estimatedMinutes} min`}
+      meta={`${day.exerciseCount} ej. · ${day.totalSets} series`}
       trailing={day.completed ? 'HECHO' : `DÍA ${day.day}`}
       trailingTone={badge}
       onPress={() =>

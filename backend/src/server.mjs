@@ -820,6 +820,187 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   }
 });
 
+app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, reply) => {
+  const routineId = textValue(request.params?.id);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a actualizar' });
+
+  const profile = await ensureUser(request.userId);
+  if (profile.role !== 'coach') {
+    return reply.code(403).send({ error: 'Solo un coach puede editar rutinas' });
+  }
+
+  const rawExercises = request.body?.exercises;
+  if (!Array.isArray(rawExercises) || rawExercises.length < 1 || rawExercises.length > 50) {
+    return reply.code(400).send({ error: 'La rutina debe tener entre 1 y 50 ejercicios' });
+  }
+
+  const seenIds = new Set();
+  const inputExercises = [];
+  for (const item of rawExercises) {
+    const id = textValue(item?.id) || null;
+    if (id) {
+      if (seenIds.has(id)) return reply.code(400).send({ error: 'Hay ejercicios repetidos en la rutina' });
+      seenIds.add(id);
+    }
+
+    const name = textValue(item?.name).slice(0, 160);
+    if (!name) return reply.code(400).send({ error: 'Cada ejercicio necesita un nombre' });
+
+    const sets = Number(item?.sets);
+    if (!Number.isInteger(sets) || sets < 1 || sets > 20) {
+      return reply.code(400).send({ error: 'Las series deben ser un entero entre 1 y 20' });
+    }
+
+    const suggested = normalizedLoad(item?.suggested);
+    if (suggested === null) return reply.code(400).send({ error: 'La carga sugerida no es válida' });
+
+    let overload = null;
+    if (item?.overload !== null && item?.overload !== undefined && item?.overload !== '') {
+      overload = normalizedLoad(item.overload);
+      if (overload === null) return reply.code(400).send({ error: 'El overload no es válido' });
+    }
+
+    inputExercises.push({
+      id,
+      name,
+      sets,
+      reps: normalizedReps(item?.reps),
+      suggested,
+      overload,
+      work: normalizedInteger(item?.work, 30, 0, 600),
+      focus: textValue(item?.focus).slice(0, 120),
+      cues: textValue(item?.cues).slice(0, 1000),
+    });
+  }
+
+  const client = await pool.connect();
+  let transactionStarted = false;
+  const reject = async (status, message) => {
+    if (transactionStarted) await client.query('ROLLBACK');
+    return reply.code(status).send({ error: message });
+  };
+
+  try {
+    await client.query('BEGIN');
+    transactionStarted = true;
+
+    const routineResult = await client.query(
+      'SELECT id, athlete_id, block FROM routine WHERE id = $1 AND athlete_id IS NOT NULL FOR UPDATE',
+      [routineId],
+    );
+    const routineRow = routineResult.rows[0];
+    if (!routineRow) return reject(404, 'No encontramos esa rutina asignada');
+
+    const currentResult = await client.query(
+      `SELECT re.exercise_id, e.*
+       FROM routine_exercise re
+       JOIN exercise e ON e.id = re.exercise_id
+       WHERE re.routine_id = $1
+       ORDER BY re.position`,
+      [routineId],
+    );
+    const currentById = new Map(currentResult.rows.map((row) => [row.exercise_id, row]));
+    const currentIds = currentResult.rows.map((row) => row.exercise_id);
+    const usageById = new Map();
+    if (currentIds.length) {
+      const usageResult = await client.query(
+        `SELECT exercise_id, COUNT(*)::int AS usage_count
+         FROM routine_exercise
+         WHERE exercise_id = ANY($1::text[])
+         GROUP BY exercise_id`,
+        [currentIds],
+      );
+      for (const row of usageResult.rows) usageById.set(row.exercise_id, row.usage_count);
+    }
+
+    for (const item of inputExercises) {
+      if (item.id && !currentById.has(item.id)) {
+        return reject(400, 'Uno de los ejercicios no pertenece a esta rutina');
+      }
+      if (!item.focus) item.focus = routineRow.block || 'Rutina';
+    }
+
+    await client.query('DELETE FROM routine_exercise WHERE routine_id = $1', [routineId]);
+    const exerciseIds = [];
+
+    for (const [position, item] of inputExercises.entries()) {
+      const previous = item.id ? currentById.get(item.id) : null;
+      let exerciseId = item.id;
+      const rest = previous?.rest ?? 90;
+      const values = [
+        item.name,
+        `${item.sets} \u00d7 ${item.reps}`,
+        item.suggested,
+        item.sets,
+        item.work,
+        rest,
+        item.focus,
+        item.cues,
+        item.overload,
+      ];
+
+      if (!previous || (item.id && usageById.get(item.id) > 1)) {
+        exerciseId = `exercise-${randomUUID()}`;
+        await client.query(
+          `INSERT INTO exercise
+            (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
+             last_date, last_load, last_reps, last_note)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+          [
+            exerciseId,
+            ...values,
+            previous?.last_date ?? null,
+            previous?.last_load ?? null,
+            previous?.last_reps ?? null,
+            previous?.last_note ?? null,
+          ],
+        );
+      } else {
+        await client.query(
+          `UPDATE exercise
+           SET name = $1, scheme = $2, suggested = $3, sets = $4, work = $5,
+               focus = $6, cues = $7, overload = $8
+           WHERE id = $9`,
+          [item.name, `${item.sets} \u00d7 ${item.reps}`, item.suggested, item.sets, item.work, item.focus, item.cues, item.overload, exerciseId],
+        );
+      }
+
+      exerciseIds.push(exerciseId);
+      await client.query(
+        `INSERT INTO routine_exercise (routine_id, exercise_id, position)
+         VALUES ($1, $2, $3)`,
+        [routineId, exerciseId, position],
+      );
+    }
+
+    if (currentIds.length) {
+      await client.query(
+        `DELETE FROM overload_row
+         WHERE exercise_id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM routine_exercise WHERE exercise_id = overload_row.exercise_id)`,
+        [currentIds],
+      );
+      await client.query(
+        `DELETE FROM exercise
+         WHERE id = ANY($1::text[])
+           AND NOT EXISTS (SELECT 1 FROM routine_exercise WHERE exercise_id = exercise.id)
+           AND NOT EXISTS (SELECT 1 FROM overload_row WHERE exercise_id = exercise.id)`,
+        [currentIds],
+      );
+    }
+
+    await client.query('COMMIT');
+    transactionStarted = false;
+    return reply.send({ ok: true, routineId, exerciseIds });
+  } catch (error) {
+    if (transactionStarted) await client.query('ROLLBACK');
+    request.log.error({ error, routineId }, 'Routine update failed');
+    return reply.code(500).send({ error: 'No pudimos guardar la rutina' });
+  } finally {
+    client.release();
+  }
+});
+
 app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, reply) => {
   const exerciseId = textValue(request.params?.id);
   if (!exerciseId) return reply.code(400).send({ error: 'Falta el ejercicio a actualizar' });
@@ -830,7 +1011,6 @@ app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, rep
   }
 
   const sets = Number(request.body?.sets);
-  const rest = Number(request.body?.rest);
   const reps = normalizedReps(request.body?.reps);
   const suggested = normalizedLoad(request.body?.suggested);
   const overload =
@@ -841,9 +1021,6 @@ app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, rep
   if (!Number.isInteger(sets) || sets < 1 || sets > 20) {
     return reply.code(400).send({ error: 'Las series deben ser un entero entre 1 y 20' });
   }
-  if (!Number.isInteger(rest) || rest < 20 || rest > 600) {
-    return reply.code(400).send({ error: 'El descanso debe estar entre 20 y 600 segundos' });
-  }
   if (suggested === null) {
     return reply.code(400).send({ error: 'La carga sugerida no es válida' });
   }
@@ -853,10 +1030,10 @@ app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, rep
 
   const result = await pool.query(
     `UPDATE exercise
-     SET scheme = $1, suggested = $2, sets = $3, rest = $4, overload = $5
-     WHERE id = $6
+     SET scheme = $1, suggested = $2, sets = $3, overload = $4
+     WHERE id = $5
      RETURNING *`,
-    [`${sets} \u00d7 ${reps}`, suggested, sets, rest, overload, exerciseId],
+    [`${sets} \u00d7 ${reps}`, suggested, sets, overload, exerciseId],
   );
   if (!result.rows[0]) return reply.code(404).send({ error: 'No encontramos ese ejercicio' });
   return reply.send({ ok: true, exercise: result.rows[0] });

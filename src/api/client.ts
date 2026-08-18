@@ -221,9 +221,32 @@ export type UpdateExerciseInput = {
   suggested: number;
   sets: number;
   reps: string;
-  rest: number;
   overload: number | null;
 };
+
+export type RoutineExerciseInput = {
+  id?: string;
+  name: string;
+  sets: number;
+  reps: string;
+  suggested: number;
+  overload: number | null;
+  work: number;
+  focus: string;
+  cues: string;
+};
+
+export type UpdateRoutineInput = {
+  exercises: RoutineExerciseInput[];
+};
+
+export function updateRoutine(tokenProvider: TokenProvider, routineId: string, input: UpdateRoutineInput) {
+  return request<{ ok: true; routineId: string; exerciseIds: string[] }>(
+    tokenProvider,
+    `/v1/routines/${routineId}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+}
 
 export function updateExercise(tokenProvider: TokenProvider, exerciseId: string, input: UpdateExerciseInput) {
   return request<{ ok: true; exercise: Record<string, unknown> }>(

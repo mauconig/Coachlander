@@ -23,6 +23,7 @@ type Props = {
   secure?: boolean;
   /** unit suffix pinned to the right, e.g. "kg" */
   suffix?: string;
+  multiline?: boolean;
   autoFocus?: boolean;
   style?: ViewStyle;
 };
@@ -41,6 +42,7 @@ export function Field({
   autoCapitalize = 'sentences',
   secure,
   suffix,
+  multiline,
   autoFocus,
   style,
 }: Props) {
@@ -54,7 +56,7 @@ export function Field({
         {label}
       </Txt>
 
-      <View style={[styles.box, hot && styles.boxHot]}>
+      <View style={[styles.box, multiline && styles.boxMultiline, hot && styles.boxHot]}>
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -64,13 +66,14 @@ export function Field({
           autoCapitalize={autoCapitalize}
           autoCorrect={false}
           secureTextEntry={secure && !revealed}
+          multiline={multiline}
           autoFocus={autoFocus}
           onFocus={() => {
             setFocused(true);
           }}
           onBlur={() => setFocused(false)}
           selectionColor={color.lime}
-          style={[styles.input, secure && !revealed && styles.masked]}
+          style={[styles.input, multiline && styles.inputMultiline, secure && !revealed && styles.masked]}
         />
 
         {secure ? (
@@ -101,6 +104,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   boxHot: { borderColor: color.lime },
+  boxMultiline: { height: 92, alignItems: 'stretch', paddingVertical: 14 },
   input: {
     flex: 1,
     color: color.text,
@@ -108,5 +112,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     padding: 0,
   },
+  inputMultiline: { textAlignVertical: 'top' },
   masked: { fontFamily: font.monoBold, letterSpacing: 3 },
 });
