@@ -91,6 +91,15 @@ const toExercise = (row: Row): Exercise => {
     focus: stringValue(row, 'focus'),
     cues: stringValue(row, 'cues'),
     overload: nullableNumber(row, 'overload'),
+    loadSource: stringValue(row, 'load_source') === 'ai' ? 'ai' : 'coach',
+    loadReason: stringValue(row, 'load_reason'),
+    progressionMetric:
+      stringValue(row, 'progression_metric') === 'seconds'
+        ? 'seconds'
+        : stringValue(row, 'progression_metric') === 'reps'
+          ? 'reps'
+          : 'load',
+    targetReps: numberValue(row, 'target_reps'),
     lastTime:
       lastDate && lastLoad !== null && lastReps
         ? {
@@ -105,6 +114,38 @@ const toExercise = (row: Row): Exercise => {
 
 export function getExercises(data: RemoteData): Exercise[] {
   return rows(data, 'exercise').map(toExercise);
+}
+
+function exerciseKey(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Exercises shown in athlete progress: one current snapshot per logical name. */
+export function getProgressExercises(data: RemoteData): Exercise[] {
+  const athleteId = data.user?.id;
+  const routines = rows(data, 'routine').filter((routine) => !athleteId || routine.athlete_id === athleteId);
+  const routineByExercise = new Map<string, { exercise: Row; routine: Row }>();
+
+  for (const link of rows(data, 'routine_exercise')) {
+    const routine = routines.find((candidate) => candidate.id === link.routine_id);
+    if (!routine) continue;
+    const exercise = rows(data, 'exercise').find((candidate) => candidate.id === link.exercise_id);
+    if (!exercise) continue;
+    const key = exerciseKey(stringValue(exercise, 'name'));
+    const current = routineByExercise.get(key);
+    const rank = `${stringValue(routine, 'week_start').slice(0, 10)}-${String(numberValue(routine, 'day')).padStart(2, '0')}-${stringValue(exercise, 'id')}`;
+    const currentRank = current
+      ? `${stringValue(current.routine, 'week_start').slice(0, 10)}-${String(numberValue(current.routine, 'day')).padStart(2, '0')}-${stringValue(current.exercise, 'id')}`
+      : '';
+    if (!current || rank > currentRank) routineByExercise.set(key, { exercise, routine });
+  }
+
+  return [...routineByExercise.values()].map(({ exercise }) => toExercise(exercise)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function getExercise(data: RemoteData, id: string): Exercise | null {
@@ -150,6 +191,9 @@ export function getTodayRoutine(data: RemoteData): Routine {
     athleteId: stringValue(routineRow, 'athlete_id'),
     estimatedMinutes: numberValue(routineRow, 'estimated_minutes'),
     secondsPerSet: numberValue(routineRow, 'seconds_per_set'),
+    weekStart: stringValue(routineRow, 'week_start').slice(0, 10) || undefined,
+    completedAt: stringValue(routineRow, 'completed_at') || undefined,
+    loadMode: stringValue(routineRow, 'load_mode') === 'ai' ? 'ai' : 'coach',
     exercises,
   };
 }
@@ -185,6 +229,9 @@ export function getRoutineById(data: RemoteData, routineId: string): Routine | n
     athleteId: stringValue(routineRow, 'athlete_id'),
     estimatedMinutes: numberValue(routineRow, 'estimated_minutes'),
     secondsPerSet: numberValue(routineRow, 'seconds_per_set'),
+    weekStart: stringValue(routineRow, 'week_start').slice(0, 10) || undefined,
+    completedAt: stringValue(routineRow, 'completed_at') || undefined,
+    loadMode: stringValue(routineRow, 'load_mode') === 'ai' ? 'ai' : 'coach',
     exercises,
   };
 }
@@ -434,6 +481,7 @@ export type TemplateExercise = {
   reps: string;
   loadKg: number | null;
   note: string;
+  progressionMetric?: 'load' | 'reps' | 'seconds';
 };
 
 export type TemplateDay = {
@@ -483,6 +531,12 @@ export function getTemplateById(data: RemoteData, templateId: string): TemplateD
             reps: stringValue(row, 'reps', '8-10'),
             loadKg: nullableNumber(row, 'load_kg'),
             note: stringValue(row, 'note'),
+            progressionMetric:
+              stringValue(row, 'progression_metric') === 'seconds'
+                ? 'seconds'
+                : stringValue(row, 'progression_metric') === 'reps'
+                  ? 'reps'
+                  : 'load',
           })),
       };
     }),

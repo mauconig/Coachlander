@@ -5,8 +5,10 @@ import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { assignTemplate } from '@/api/client';
 import { Avatar } from '@/components/Avatar';
+import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { Chip, ChipGroup } from '@/components/Chip';
+import { CoachLoadModePicker, type CoachLoadMode } from '@/components/CoachLoadModePicker';
 import { Icon } from '@/components/Icon';
 import { Row } from '@/components/Row';
 import { Screen } from '@/components/Screen';
@@ -220,19 +222,23 @@ function AddRoutineSheet({
   const refreshRemoteData = useRefreshRemoteData();
   const templates = useQuery(getTemplates);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  const [loadMode, setLoadMode] = useState<CoachLoadMode>('ai');
 
-  const assignExisting = async (templateId: string) => {
+  const assignExisting = async (templateId: string, selectedLoadMode: CoachLoadMode) => {
     if (assigningId) return;
     setAssigningId(templateId);
     try {
       await assignTemplate(getToken, templateId, {
         clientIds: [client.id],
         autoOverload: true,
+        loadMode: selectedLoadMode,
         week: weekIndexOf(weekStart),
         weekStart,
         replace: true,
       });
       await refreshRemoteData();
+      setPendingTemplateId(null);
       onClose();
     } catch (error: unknown) {
       console.warn('[Coachlander] No se pudo asignar la plantilla', error);
@@ -246,7 +252,8 @@ function AddRoutineSheet({
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} eyebrow="AGREGAR RUTINA" title="¿Qué querés hacer?">
+    <>
+      <Sheet visible={visible} onClose={onClose} eyebrow="AGREGAR RUTINA" title="¿Qué querés hacer?">
       <Pressable
         style={styles.addOption}
         onPress={() => router.push(`/crear/nuevo?clientId=${client.id}&weekStart=${weekStart}`)}
@@ -283,12 +290,27 @@ function AddRoutineSheet({
                   </Txt>
                 </View>
               }
-              onPress={() => assignExisting(template.id)}
+              onPress={() => setPendingTemplateId(template.id)}
             />
           ))}
         </View>
       )}
-    </Sheet>
+      </Sheet>
+
+      <Sheet
+        visible={!!pendingTemplateId}
+        onClose={() => setPendingTemplateId(null)}
+        eyebrow="ASIGNAR RUTINA"
+        title="¿Quién define las cargas?"
+      >
+        <CoachLoadModePicker value={loadMode} onChange={setLoadMode} />
+        <Button
+          label={assigningId ? 'Asignando…' : 'Continuar'}
+          onPress={() => pendingTemplateId && void assignExisting(pendingTemplateId, loadMode)}
+          disabled={!!assigningId}
+        />
+      </Sheet>
+    </>
   );
 }
 

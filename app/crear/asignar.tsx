@@ -8,6 +8,7 @@ import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Chip } from '@/components/Chip';
+import { CoachLoadModePicker } from '@/components/CoachLoadModePicker';
 import { Field } from '@/components/Field';
 import { Heading } from '@/components/Note';
 import { Row } from '@/components/Row';
@@ -43,6 +44,8 @@ export default function AssignCreatedRoutine() {
     toggleAssignee,
     autoOverload,
     setAutoOverload,
+    loadMode,
+    setLoadMode,
     reset,
     preselectWeekStart,
     editingTemplateId,
@@ -164,6 +167,7 @@ export default function AssignCreatedRoutine() {
         await assignTemplate(getToken, template.id, {
           clientIds: assignees,
           autoOverload,
+          loadMode,
           week: weekIndexOf(selectedWeek.weekStart),
           weekStart: selectedWeek.weekStart,
           replace: true,
@@ -261,11 +265,15 @@ export default function AssignCreatedRoutine() {
         </View>
       ) : null}
 
+      {isCoach && !isEditingTemplate && count ? (
+        <CoachLoadModePicker value={loadMode} onChange={setLoadMode} />
+      ) : null}
+
       {isEditingTemplate ? null : (
         <Row
-          title="Overload automático"
+          title="Progresión automática"
           meta={`+2,5 ${unit} por semana`}
-          right={<Toggle value={autoOverload} onChange={setAutoOverload} label="Overload automático" />}
+          right={<Toggle value={autoOverload} onChange={setAutoOverload} label="Progresión automática" />}
         />
       )}
 

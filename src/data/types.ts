@@ -21,6 +21,10 @@ export type Exercise = {
   cues: string;
   /** week-over-week auto progression in kg */
   overload: number | null;
+  loadSource: 'ai' | 'coach';
+  loadReason: string;
+  progressionMetric: 'load' | 'reps' | 'seconds';
+  targetReps: number;
   lastTime?: {
     date: string;
     load: number;
@@ -39,6 +43,9 @@ export type Routine = {
   athleteId: string;
   estimatedMinutes: number;
   secondsPerSet: number;
+  weekStart?: string;
+  completedAt?: string;
+  loadMode: 'ai' | 'coach';
   exercises: Exercise[];
 };
 
@@ -93,6 +100,7 @@ export type ImportedExercise = {
   raw?: string;
   question?: string;
   options?: [string, string];
+  progressionMetric?: 'load' | 'reps' | 'seconds';
 };
 
 export type ImportedRoutineDay = {

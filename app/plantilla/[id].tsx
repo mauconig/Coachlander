@@ -9,6 +9,7 @@ import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { Chip } from '@/components/Chip';
+import { CoachLoadModePicker, type CoachLoadMode } from '@/components/CoachLoadModePicker';
 import { Heading, SectionHeader } from '@/components/Note';
 import { RadioDot, Toggle } from '@/components/Toggle';
 import { Row } from '@/components/Row';
@@ -162,8 +163,9 @@ function AssignTemplateSheet({
   const { getToken } = useAuth();
   const refreshRemoteData = useRefreshRemoteData();
   const clients = useQuery(getClients);
-  const [selected, setSelected] = useState<string[]>([]);
   const [autoOverload, setAutoOverload] = useState(true);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [loadMode, setLoadMode] = useState<CoachLoadMode>('ai');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const weekOptions: WeekOption[] = [
@@ -192,7 +194,8 @@ function AssignTemplateSheet({
     try {
       await assignTemplate(getToken, templateId, {
         clientIds: selected,
-        autoOverload,
+        autoOverload: true,
+        loadMode,
         week: weekIndexOf(week.weekStart),
         weekStart: week.weekStart,
         replace: true,
@@ -235,10 +238,12 @@ function AssignTemplateSheet({
           })}
         </View>
 
+        <CoachLoadModePicker value={loadMode} onChange={setLoadMode} />
+
         <Row
-          title="Overload automático"
+          title="Progresión automática"
           meta="Se aplica a las rutinas nuevas"
-          right={<Toggle value={autoOverload} onChange={setAutoOverload} label="Overload automático" />}
+          right={<Toggle value={autoOverload} onChange={setAutoOverload} label="Progresión automática" />}
         />
 
         {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}

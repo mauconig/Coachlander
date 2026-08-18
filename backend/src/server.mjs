@@ -394,6 +394,7 @@ async function fetchCoachHistoryDetail(routineId) {
        r.name,
        r.completed_at,
        r.estimated_minutes AS minutes,
+       r.load_mode,
        c.id AS client_id,
        c.name AS client_name
      FROM routine r
@@ -412,6 +413,11 @@ async function fetchCoachHistoryDetail(routineId) {
        e.name,
        e.sets AS planned_sets,
        e.scheme,
+       e.suggested,
+       e.load_source,
+       e.load_reason,
+       e.progression_metric,
+       e.target_reps,
        sl.set_index,
        sl.load,
        sl.reps
@@ -435,6 +441,11 @@ async function fetchCoachHistoryDetail(routineId) {
         name: row.name,
         plannedSets: Number(row.planned_sets) || 0,
         scheme: row.scheme ?? '',
+        suggested: Number(row.suggested) || 0,
+        loadSource: row.load_source === 'ai' ? 'ai' : 'coach',
+        loadReason: row.load_reason ?? '',
+        progressionMetric: row.progression_metric === 'seconds' ? 'seconds' : row.progression_metric === 'reps' ? 'reps' : 'load',
+        targetReps: Number(row.target_reps) || 0,
         sets: [],
       };
       byId.set(row.exercise_id, exercise);
@@ -456,6 +467,7 @@ async function fetchCoachHistoryDetail(routineId) {
     date: databaseDateValue(routine.completed_at),
     name: routine.name,
     minutes: Number(routine.minutes) || 0,
+    loadMode: routine.load_mode === 'ai' ? 'ai' : 'coach',
     exercises,
   };
 }
@@ -627,7 +639,7 @@ async function fetchCoachWeekdayActivity({ clientId, from, to }) {
   };
 }
 
-const MUSCLE_REGION_LABELS = {
+const MUSCLE_DETAIL_LABELS = {
   pecho: 'Pecho',
   espalda: 'Espalda',
   espalda_baja: 'Espalda baja',
@@ -641,11 +653,23 @@ const MUSCLE_REGION_LABELS = {
   otros: 'Otros',
 };
 
-const MUSCLE_REGION_KEYS = Object.keys(MUSCLE_REGION_LABELS);
+const MUSCLE_DETAIL_KEYS = Object.keys(MUSCLE_DETAIL_LABELS);
+const MUSCLE_PRIMARY_LABELS = {
+  pecho: 'Pecho',
+  espalda: 'Espalda',
+  espalda_baja: 'Espalda baja',
+  hombros: 'Hombros',
+  brazos: 'Brazos',
+  piernas: 'Piernas',
+  core: 'Core',
+  otros: 'Otros',
+};
+const MUSCLE_PRIMARY_KEYS = Object.keys(MUSCLE_PRIMARY_LABELS);
+const MUSCLE_LEG_KEYS = ['cuadriceps', 'gluteos', 'cadena_posterior', 'pantorrillas'];
 
 function resolveMuscleGroups(name, focus, storedGroups) {
   const stored = Array.isArray(storedGroups)
-    ? storedGroups.filter((group) => MUSCLE_REGION_KEYS.includes(group))
+    ? storedGroups.filter((group) => MUSCLE_DETAIL_KEYS.includes(group))
     : [];
   if (stored.length) return [...new Set(stored)];
 
@@ -692,18 +716,15 @@ async function fetchCoachMuscleBalance({ clientId, from, to }) {
   for (const row of result.rows) {
     const session = sessions.get(row.routine_id) ?? {
       date: databaseDateValue(row.training_date),
-      groups: new Set(),
-      hasLogs: false,
+      exercises: new Map(),
     };
-    if (row.set_log_id) {
-      session.hasLogs = true;
-      resolveMuscleGroups(row.name, row.focus, row.muscle_groups).forEach((group) => session.groups.add(group));
+    if (row.set_log_id && row.exercise_id) {
+      const exerciseKey = String(row.exercise_id);
+      if (!session.exercises.has(exerciseKey)) {
+        session.exercises.set(exerciseKey, resolveMuscleGroups(row.name, row.focus, row.muscle_groups));
+      }
     }
     sessions.set(row.routine_id, session);
-  }
-
-  for (const session of sessions.values()) {
-    if (!session.hasLogs || !session.groups.size) session.groups.add('otros');
   }
 
   const weekly = statsWeekWindows(from, to).map((window) => ({
@@ -711,7 +732,9 @@ async function fetchCoachMuscleBalance({ clientId, from, to }) {
     daysIncluded: window.daysIncluded,
     sessions: 0,
     normalizedSessions: 0,
+    exerciseCount: 0,
     groups: new Map(),
+    details: new Map(),
   }));
   const windowFor = (date) => weekly.find((window) => date >= window.weekStart && date <= addIsoDays(window.weekStart, 6));
 
@@ -719,28 +742,49 @@ async function fetchCoachMuscleBalance({ clientId, from, to }) {
     const window = windowFor(session.date);
     if (!window) continue;
     window.sessions += 1;
-    for (const group of session.groups) window.groups.set(group, (window.groups.get(group) ?? 0) + 1);
+    for (const groups of session.exercises.values()) {
+      window.exerciseCount += 1;
+      const primaryGroups = new Set(groups.map((group) => MUSCLE_LEG_KEYS.includes(group) ? 'piernas' : group));
+      for (const primary of primaryGroups) {
+        window.groups.set(primary, (window.groups.get(primary) ?? 0) + 1);
+      }
+      for (const group of groups) {
+        window.details.set(group, (window.details.get(group) ?? 0) + 1);
+      }
+    }
   }
 
   for (const window of weekly) window.normalizedSessions = normalizedWeeklyValue(window.sessions, window.daysIncluded);
 
-  const activeWeeks = weekly.filter((window) => window.sessions > 0);
-  const items = MUSCLE_REGION_KEYS.map((key) => {
-    const sessionsCount = activeWeeks.reduce((total, week) => total + (week.groups.get(key) ?? 0), 0);
-    const percentage = activeWeeks.length
-      ? Math.round(activeWeeks.reduce((total, week) => total + ((week.groups.get(key) ?? 0) / week.sessions) * 100, 0) / activeWeeks.length)
-      : 0;
+  const totalExercises = weekly.reduce((total, week) => total + week.exerciseCount, 0);
+  const averageWeeklyExercises = (key, source = 'groups') => weekly.length
+    ? Math.round(weekly.reduce((total, week) => total + normalizedWeeklyValue(week[source].get(key) ?? 0, week.daysIncluded), 0) / weekly.length * 100) / 100
+    : 0;
+  const percentageFor = (count) => totalExercises ? Math.round((count / totalExercises) * 100) : 0;
+  const makeItem = (key, source = 'groups') => {
+    const exercises = weekly.reduce((total, week) => total + (week[source].get(key) ?? 0), 0);
     return {
       key,
-      label: MUSCLE_REGION_LABELS[key],
-      sessions: sessionsCount,
-      sessionsPerWeek: Math.round((sessionsCount / Math.max(weekly.length, 1)) * 100) / 100,
-      percentage,
+      label: source === 'details' ? MUSCLE_DETAIL_LABELS[key] : MUSCLE_PRIMARY_LABELS[key],
+      exercises,
+      exercisesPerWeek: averageWeeklyExercises(key, source),
+      percentage: percentageFor(exercises),
+      sessions: exercises,
+      sessionsPerWeek: averageWeeklyExercises(key, source),
     };
-  }).sort((a, b) => b.sessions - a.sessions || a.label.localeCompare(b.label));
+  };
+
+  const items = MUSCLE_PRIMARY_KEYS.map((key) => {
+    const item = makeItem(key);
+    if (key === 'piernas') {
+      item.details = MUSCLE_LEG_KEYS.map((detailKey) => makeItem(detailKey, 'details'));
+    }
+    return item;
+  });
 
   return {
     totalSessions: sessions.size,
+    totalExercises,
     weeks: weekly.map(({ weekStart, daysIncluded, sessions: count, normalizedSessions }) => ({
       weekStart,
       daysIncluded,
@@ -1305,6 +1349,214 @@ function roundLoad(value) {
   return Math.round(Math.max(0, value) * 2) / 2;
 }
 
+function targetValueFromReps(value, fallback = 8) {
+  const numbers = String(value ?? '').match(/\d+/g)?.map(Number).filter(Number.isFinite) ?? [];
+  return numbers.length ? numbers[numbers.length - 1] : fallback;
+}
+
+function isBodyweightName(name) {
+  return /\b(plancha|flexiones?|dominadas?|fondos|burpees?)\b/.test(normalizeName(name));
+}
+
+function progressionMetricFor(name, reps, load, explicitMetric) {
+  if (explicitMetric === 'seconds' || explicitMetric === 'reps' || explicitMetric === 'load') return explicitMetric;
+  if (/\b(?:s|seg|segundos?)\b/.test(String(reps ?? '').toLowerCase())) return 'seconds';
+  if (isBodyweightName(name) || load === null || load === undefined) return 'reps';
+  return 'load';
+}
+
+function incrementForMetric(metric) {
+  return metric === 'seconds' ? 5 : 2;
+}
+
+function replaceTargetInReps(reps, target) {
+  const raw = String(reps ?? '').trim() || String(target);
+  const matches = [...raw.matchAll(/\d+/g)];
+  if (!matches.length) return String(target);
+  const last = matches[matches.length - 1];
+  return `${raw.slice(0, last.index)}${target}${raw.slice(last.index + last[0].length)}`;
+}
+
+async function findLatestCompletedPerformance(client, athleteId, exerciseName) {
+  const normalized = normalizeName(exerciseName);
+  if (!normalized) return null;
+  const result = await client.query(
+    `SELECT r.id AS routine_id, r.completed_at, e.name, e.sets, e.scheme,
+            e.target_reps, e.progression_metric, sl.set_index, sl.load, sl.reps
+       FROM routine r
+       JOIN set_log sl ON sl.routine_id = r.id AND sl.clerk_user_id = r.athlete_id
+       JOIN exercise e ON e.id = sl.exercise_id
+      WHERE r.athlete_id = $1
+        AND r.completed_at IS NOT NULL
+      ORDER BY r.completed_at DESC, sl.set_index ASC, sl.id DESC
+      LIMIT 2000`,
+    [athleteId],
+  );
+
+  let current = null;
+  for (const row of result.rows) {
+    if (normalizeName(row.name) !== normalized) continue;
+    if (!current || current.routineId !== row.routine_id) {
+      if (current) break;
+      current = {
+        routineId: row.routine_id,
+        completedAt: row.completed_at,
+        sets: Number(row.sets) || 1,
+        scheme: row.scheme ?? '',
+        targetReps: Number(row.target_reps) || targetValueFromReps(row.scheme),
+        metric: progressionMetricFor(row.name, row.scheme, row.load, row.progression_metric),
+        logs: [],
+      };
+    }
+    current.logs.push({
+      setIndex: Number(row.set_index) || 0,
+      load: row.load === null ? null : Number(row.load),
+      reps: Number(row.reps) || 0,
+    });
+  }
+  return current;
+}
+
+async function calculateAiLoadDecision(client, {
+  athleteId,
+  exerciseName,
+  reps,
+  sets,
+  fallbackLoad,
+  weightKg,
+  progressionMetric,
+}) {
+  const metric = progressionMetricFor(exerciseName, reps, fallbackLoad, progressionMetric);
+  const targetReps = targetValueFromReps(reps);
+  const latest = await findLatestCompletedPerformance(client, athleteId, exerciseName);
+
+  if (!latest) {
+    const initialLoad = metric === 'load'
+      ? await predictLoad(client, athleteId, exerciseName, weightKg)
+      : 0;
+    return {
+      loadKg: initialLoad ?? (metric === 'load' ? fallbackLoad ?? 0 : 0),
+      reps: String(reps),
+      targetReps,
+      metric,
+      previousLoad: null,
+      previousReps: null,
+      reason: 'Sin historial completado: carga inicial de referencia.',
+    };
+  }
+
+  const latestLoad = latest.logs
+    .map((log) => log.load)
+    .filter((load) => load !== null && Number.isFinite(load) && load > 0)
+    .reduce((max, load) => Math.max(max, load), 0);
+  const currentLoad = latestLoad || (metric === 'load' ? fallbackLoad ?? 0 : 0);
+  const bestReps = latest.logs.reduce((max, log) => Math.max(max, log.reps), 0);
+  const completedAllSets = latest.logs.length >= (Number(sets) || latest.sets)
+    && latest.logs.every((log) => log.reps >= targetReps);
+
+  if (metric === 'load') {
+    return {
+      loadKg: roundLoad(completedAllSets ? currentLoad + 2.5 : currentLoad) ?? 0,
+      reps: String(reps),
+      targetReps,
+      metric,
+      previousLoad: roundLoad(currentLoad),
+      previousReps: bestReps || null,
+      reason: completedAllSets
+        ? 'Aumenta 2,5 kg: completó todas las series objetivo.'
+        : 'Mantiene la carga: faltaron repeticiones objetivo.',
+    };
+  }
+
+  const nextTarget = completedAllSets ? targetReps + incrementForMetric(metric) : targetReps;
+  return {
+    loadKg: 0,
+    reps: replaceTargetInReps(reps, nextTarget),
+    targetReps: nextTarget,
+    metric,
+    previousLoad: 0,
+    previousReps: bestReps || null,
+    reason: completedAllSets
+      ? `Aumenta ${incrementForMetric(metric)} ${metric === 'seconds' ? 'segundos' : 'repeticiones'}: completó el objetivo.`
+      : 'Mantiene el objetivo: faltaron repeticiones o tiempo.',
+  };
+}
+
+async function refreshOverloadRows(client, routineId) {
+  const result = await client.query(
+    `SELECT e.id, e.name, e.scheme, e.sets, e.suggested, e.target_reps,
+            e.progression_metric, sl.set_index, sl.load, sl.reps
+       FROM routine_exercise re
+       JOIN exercise e ON e.id = re.exercise_id
+       LEFT JOIN set_log sl
+         ON sl.routine_id = re.routine_id
+        AND sl.exercise_id = re.exercise_id
+      WHERE re.routine_id = $1
+      ORDER BY re.position, sl.set_index`,
+    [routineId],
+  );
+
+  const byExercise = new Map();
+  for (const row of result.rows) {
+    const current = byExercise.get(row.id) ?? {
+      id: row.id,
+      name: row.name,
+      scheme: row.scheme,
+      sets: Number(row.sets) || 1,
+      suggested: Number(row.suggested) || 0,
+      targetReps: Number(row.target_reps) || targetValueFromReps(row.scheme),
+      metric: progressionMetricFor(row.name, row.scheme, row.suggested, row.progression_metric),
+      logs: [],
+    };
+    if (row.set_index !== null && row.set_index !== undefined) {
+      current.logs.push({
+        setIndex: Number(row.set_index) || 0,
+        load: row.load === null ? null : Number(row.load),
+        reps: Number(row.reps) || 0,
+      });
+    }
+    byExercise.set(row.id, current);
+  }
+
+  for (const exercise of byExercise.values()) {
+    const successful = exercise.logs.length >= exercise.sets
+      && exercise.logs.every((log) => log.reps >= exercise.targetReps);
+    const maxLoad = exercise.logs
+      .map((log) => log.load)
+      .filter((load) => load !== null && Number.isFinite(load) && load > 0)
+      .reduce((max, load) => Math.max(max, load), 0);
+    const currentLoad = exercise.metric === 'load' ? maxLoad || exercise.suggested : 0;
+    const nextLoad = exercise.metric === 'load' && successful ? (roundLoad(currentLoad + 2.5) ?? currentLoad) : currentLoad;
+    const nextReps = exercise.metric === 'load'
+      ? exercise.targetReps
+      : successful
+        ? exercise.targetReps + incrementForMetric(exercise.metric)
+        : exercise.targetReps;
+
+    for (let setNo = 1; setNo <= exercise.sets; setNo += 1) {
+      const log = exercise.logs.find((item) => item.setIndex === setNo - 1);
+      await client.query(
+        `INSERT INTO overload_row
+          (exercise_id, set_no, last_load, last_reps, next_load, next_reps)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (exercise_id, set_no) DO UPDATE SET
+           last_load = EXCLUDED.last_load,
+           last_reps = EXCLUDED.last_reps,
+           next_load = EXCLUDED.next_load,
+           next_reps = EXCLUDED.next_reps`,
+        [
+          exercise.id,
+          setNo,
+          log?.load === null || log?.load === undefined ? 0 : roundLoad(log.load) ?? 0,
+          log?.reps ?? 0,
+          nextLoad,
+          nextReps,
+        ],
+      );
+    }
+  }
+}
+
 /**
  * Predice la carga sugerida para un alumno y un ejercicio:
  * 1) Historial del alumno (set_log por nombre normalizado): lo respeta tal cual.
@@ -1320,7 +1572,12 @@ async function predictLoad(client, athleteId, exerciseName, weightKg) {
     `SELECT e.name, sl.load, sl.reps, sl.logged_at
        FROM set_log sl
        JOIN exercise e ON e.id = sl.exercise_id
-      WHERE sl.clerk_user_id = $1 AND sl.load IS NOT NULL AND sl.load > 0
+       JOIN routine r ON r.id = sl.routine_id
+      WHERE sl.clerk_user_id = $1
+        AND r.athlete_id = $1
+        AND r.completed_at IS NOT NULL
+        AND sl.load IS NOT NULL
+        AND sl.load > 0
       ORDER BY sl.logged_at DESC
       LIMIT 500`,
     [athleteId],
@@ -1382,6 +1639,10 @@ function normalizeImportedDays(rawDays) {
         raw: textValue(rawExercise?.raw, textValue(rawExercise?.name, '')),
         question: textValue(rawExercise?.question, 'Confirmá la carga inicial antes de guardar.'),
         note: textValue(rawExercise?.note, '').slice(0, 300),
+        progressionMetric:
+          rawExercise?.progressionMetric === 'seconds' || rawExercise?.progressionMetric === 'reps'
+            ? rawExercise.progressionMetric
+            : 'load',
       })),
     };
   });
@@ -1617,9 +1878,10 @@ app.post('/v1/templates', { preHandler: authenticate }, async (request, reply) =
       );
       for (const [index, exercise] of day.exercises.entries()) {
         await client.query(
-          `INSERT INTO template_exercise (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-          [templateId, day.day, index, exercise.name, exercise.sets, exercise.reps, exercise.load, exercise.rest, exercise.note || null],
+        `INSERT INTO template_exercise
+           (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note, progression_metric)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [templateId, day.day, index, exercise.name, exercise.sets, exercise.reps, exercise.load, exercise.rest, exercise.note || null, exercise.progressionMetric],
         );
       }
     }
@@ -1665,11 +1927,17 @@ app.patch('/v1/templates/:id', { preHandler: authenticate }, async (request, rep
     // El descanso no forma parte del payload del entrenador. Conservamos el
     // valor técnico existente por posición y usamos 90 s para ejercicios nuevos.
     const restResult = await client.query(
-      'SELECT day, position, rest_seconds FROM template_exercise WHERE template_id = $1',
+      'SELECT day, position, rest_seconds, progression_metric FROM template_exercise WHERE template_id = $1',
       [templateId],
     );
     const restByPosition = new Map(
-      restResult.rows.map((row) => [`${Number(row.day)}:${Number(row.position)}`, Number(row.rest_seconds) || 90]),
+      restResult.rows.map((row) => [
+        `${Number(row.day)}:${Number(row.position)}`,
+        {
+          rest: Number(row.rest_seconds) || 90,
+          metric: row.progression_metric === 'seconds' || row.progression_metric === 'reps' ? row.progression_metric : 'load',
+        },
+      ]),
     );
 
     await client.query('DELETE FROM template_exercise WHERE template_id = $1', [templateId]);
@@ -1681,8 +1949,9 @@ app.patch('/v1/templates/:id', { preHandler: authenticate }, async (request, rep
       );
       for (const [index, exercise] of day.exercises.entries()) {
         await client.query(
-          `INSERT INTO template_exercise (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        `INSERT INTO template_exercise
+           (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note, progression_metric)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
           [
             templateId,
             day.day,
@@ -1691,8 +1960,9 @@ app.patch('/v1/templates/:id', { preHandler: authenticate }, async (request, rep
             exercise.sets,
             exercise.reps,
             exercise.load,
-            restByPosition.get(`${day.day}:${index}`) ?? 90,
+            restByPosition.get(`${day.day}:${index}`)?.rest ?? 90,
             exercise.note || null,
+            restByPosition.get(`${day.day}:${index}`)?.metric ?? exercise.progressionMetric,
           ],
         );
       }
@@ -1736,6 +2006,7 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   if (!weekStart) return reply.code(400).send({ error: 'Falta la semana a asignar' });
   const week = Number(request.body?.week) > 0 ? Number(request.body?.week) : weekOfMonth(weekStart);
   const replace = request.body?.replace === true;
+  const loadMode = request.body?.loadMode === 'coach' ? 'coach' : 'ai';
 
   const client = await pool.connect();
   try {
@@ -1752,7 +2023,7 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
       [templateId],
     );
     const exerciseRows = await client.query(
-      'SELECT day, position, name, sets, reps, load_kg, rest_seconds, note FROM template_exercise WHERE template_id = $1 ORDER BY day, position',
+      'SELECT day, position, name, sets, reps, load_kg, rest_seconds, note, progression_metric FROM template_exercise WHERE template_id = $1 ORDER BY day, position',
       [templateId],
     );
     const days = dayRows.rows.map((row) => ({
@@ -1785,8 +2056,8 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
         const totalSets = day.exercises.reduce((sum, exercise) => sum + exercise.sets, 0);
         await client.query(
           `INSERT INTO routine
-            (id, plan_id, name, block, week, week_start, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, 45, $10)`,
+            (id, plan_id, name, block, week, week_start, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today, load_mode)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, 45, $10, $11)`,
           [
             routineId,
             planId,
@@ -1798,29 +2069,54 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
             athleteId,
             Math.max(10, Math.ceil(totalSets * 2.25 + day.exercises.length * 1.5)),
             dayIndex === 0 ? 1 : 0,
+            loadMode,
           ],
         );
 
         for (const [position, exercise] of day.exercises.entries()) {
           const exerciseId = `exercise-${randomUUID()}`;
           const note = typeof exercise.note === 'string' && exercise.note.trim() ? exercise.note.trim() : '';
-          const predicted = await predictLoad(client, athleteId, exercise.name, weightKg);
-          const suggested = predicted ?? exercise.load_kg ?? 0;
+          const metric = progressionMetricFor(exercise.name, exercise.reps, exercise.load_kg, exercise.progression_metric);
+          const decision = loadMode === 'ai'
+            ? await calculateAiLoadDecision(client, {
+                athleteId,
+                exerciseName: exercise.name,
+                reps: exercise.reps,
+                sets: exercise.sets,
+                fallbackLoad: exercise.load_kg,
+                weightKg,
+                progressionMetric: metric,
+              })
+            : {
+                loadKg: exercise.load_kg ?? 0,
+                reps: exercise.reps,
+                targetReps: targetValueFromReps(exercise.reps),
+                metric,
+                previousLoad: null,
+                previousReps: null,
+                reason: 'Carga definida por el entrenador.',
+              };
+          const suggested = decision.loadKg ?? 0;
           await client.query(
             `INSERT INTO exercise
               (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
-               last_date, last_load, last_reps, last_note)
-             VALUES ($1, $2, $3, $4, $5, 30, $6, $7, $8, $9, NULL, NULL, NULL, NULL)`,
+               last_date, last_load, last_reps, last_note, load_source, load_reason,
+               progression_metric, target_reps)
+             VALUES ($1, $2, $3, $4, $5, 30, $6, $7, $8, $9, NULL, NULL, NULL, NULL, $10, $11, $12, $13)`,
             [
               exerciseId,
               exercise.name,
-              `${exercise.sets} × ${exercise.reps}`,
+              `${exercise.sets} × ${decision.reps}`,
               suggested,
               exercise.sets,
               exercise.rest_seconds,
               day.name,
               note || 'Cargá la plantilla del entrenador y confirmá la técnica antes de comenzar.',
               request.body?.autoOverload === true ? 2.5 : null,
+              loadMode,
+              decision.reason,
+              decision.metric,
+              decision.targetReps,
             ],
           );
           await client.query(
@@ -1828,6 +2124,27 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
              VALUES ($1, $2, $3)`,
             [routineId, exerciseId, position],
           );
+
+          for (let setNo = 1; setNo <= exercise.sets; setNo += 1) {
+            await client.query(
+              `INSERT INTO overload_row
+                (exercise_id, set_no, last_load, last_reps, next_load, next_reps)
+               VALUES ($1, $2, $3, $4, $5, $6)
+               ON CONFLICT (exercise_id, set_no) DO UPDATE SET
+                 last_load = EXCLUDED.last_load,
+                 last_reps = EXCLUDED.last_reps,
+                 next_load = EXCLUDED.next_load,
+                 next_reps = EXCLUDED.next_reps`,
+              [
+                exerciseId,
+                setNo,
+                decision.previousLoad ?? 0,
+                decision.previousReps ?? 0,
+                suggested,
+                decision.targetReps,
+              ],
+            );
+          }
         }
       }
       results.push({ clientId, planId, routineIds });
@@ -1920,6 +2237,8 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
     const routineRow = routineResult.rows[0];
     if (!routineRow) return reject(404, 'No encontramos esa rutina asignada');
 
+    await client.query("UPDATE routine SET load_mode = 'coach' WHERE id = $1", [routineId]);
+
     const currentResult = await client.query(
       `SELECT re.exercise_id, e.*
        FROM routine_exercise re
@@ -1973,8 +2292,9 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
         await client.query(
           `INSERT INTO exercise
             (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
-             last_date, last_load, last_reps, last_note)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+             last_date, last_load, last_reps, last_note, load_source, load_reason,
+             progression_metric, target_reps)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'coach', 'Carga ajustada por el entrenador.', $15, $16)`,
           [
             exerciseId,
             ...values,
@@ -1982,15 +2302,21 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
             previous?.last_load ?? null,
             previous?.last_reps ?? null,
             previous?.last_note ?? null,
+            progressionMetricFor(item.name, item.reps, item.suggested),
+            targetValueFromReps(item.reps),
           ],
         );
       } else {
         await client.query(
           `UPDATE exercise
            SET name = $1, scheme = $2, suggested = $3, sets = $4, work = $5,
-               focus = $6, cues = $7, overload = $8
-           WHERE id = $9`,
-          [item.name, `${item.sets} \u00d7 ${item.reps}`, item.suggested, item.sets, item.work, item.focus, item.cues, item.overload, exerciseId],
+               focus = $6, cues = $7, overload = $8,
+               load_source = 'coach',
+               load_reason = 'Carga ajustada por el entrenador.',
+               progression_metric = $9,
+               target_reps = $10
+           WHERE id = $11`,
+          [item.name, `${item.sets} \u00d7 ${item.reps}`, item.suggested, item.sets, item.work, item.focus, item.cues, item.overload, progressionMetricFor(item.name, item.reps, item.suggested), targetValueFromReps(item.reps), exerciseId],
         );
       }
 
@@ -2057,27 +2383,56 @@ app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, rep
     return reply.code(400).send({ error: 'El overload no es válido' });
   }
 
+  const scheme = `${sets} \u00d7 ${reps}`;
   const result = await pool.query(
     `UPDATE exercise
-     SET scheme = $1, suggested = $2, sets = $3, overload = $4
-     WHERE id = $5
+     SET scheme = $1,
+         suggested = $2,
+         sets = $3,
+         overload = $4,
+         load_source = 'coach',
+         load_reason = 'Carga ajustada por el entrenador.',
+         progression_metric = $5,
+         target_reps = $6
+     WHERE id = $7
      RETURNING *`,
-    [`${sets} \u00d7 ${reps}`, suggested, sets, overload, exerciseId],
+    [scheme, suggested, sets, overload, progressionMetricFor('', reps, suggested), targetValueFromReps(reps), exerciseId],
   );
   if (!result.rows[0]) return reply.code(404).send({ error: 'No encontramos ese ejercicio' });
   return reply.send({ ok: true, exercise: result.rows[0] });
 });
 
+async function completeRoutine(client, routineId, athleteId) {
+  const result = await client.query(
+    'UPDATE routine SET completed_at = COALESCE(completed_at, NOW()) WHERE id = $1 AND athlete_id = $2 RETURNING id, completed_at',
+    [routineId, athleteId],
+  );
+  if (!result.rows[0]) return null;
+  await refreshOverloadRows(client, routineId);
+  return result.rows[0];
+}
+
 app.post('/v1/routines/:id/complete', { preHandler: authenticate }, async (request, reply) => {
   const routineId = textValue(request.params?.id);
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a completar' });
 
-  const result = await pool.query(
-    'UPDATE routine SET completed_at = NOW() WHERE id = $1 AND athlete_id = $2 RETURNING id, completed_at',
-    [routineId, request.userId],
-  );
-  if (!result.rows[0]) return reply.code(404).send({ error: 'No encontramos esa rutina' });
-  return reply.send({ ok: true, id: result.rows[0].id, completedAt: result.rows[0].completed_at });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await completeRoutine(client, routineId, request.userId);
+    if (!result) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa rutina' });
+    }
+    await client.query('COMMIT');
+    return reply.send({ ok: true, id: result.id, completedAt: result.completed_at });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error, routineId }, 'Routine completion failed');
+    return reply.code(500).send({ error: 'No pudimos completar la rutina' });
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/v1/session/start', { preHandler: authenticate }, async (request, reply) => {
@@ -2109,10 +2464,11 @@ app.post('/v1/session/end', { preHandler: authenticate }, async (request, reply)
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const updated = await client.query(
-      'UPDATE routine SET completed_at = NOW() WHERE id = $1 AND athlete_id = $2 RETURNING id',
-      [routineId, request.userId],
-    );
+    const updated = await completeRoutine(client, routineId, request.userId);
+    if (!updated) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa rutina' });
+    }
     await client.query(
       `UPDATE client SET
          live_routine = NULL,
@@ -2124,7 +2480,6 @@ app.post('/v1/session/end', { preHandler: authenticate }, async (request, reply)
       [request.userId],
     );
     await client.query('COMMIT');
-    if (!updated.rows[0]) return reply.code(404).send({ error: 'No encontramos esa rutina' });
     return reply.send({ ok: true, routineId });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -2149,10 +2504,12 @@ async function removeWeekRoutines(client, athleteId, weekStart) {
   );
   const exerciseIds = [...new Set(exerciseLinks.rows.map((row) => row.exercise_id))];
 
+  await client.query('DELETE FROM set_log WHERE routine_id = ANY($1::text[])', [routineIds]);
   await client.query('DELETE FROM routine_exercise WHERE routine_id = ANY($1::text[])', [routineIds]);
   await client.query('DELETE FROM routine WHERE id = ANY($1::text[])', [routineIds]);
 
   if (exerciseIds.length) {
+    await client.query('DELETE FROM overload_row WHERE exercise_id = ANY($1::text[])', [exerciseIds]);
     await client.query(
       `DELETE FROM exercise
        WHERE id = ANY($1::text[])
@@ -2175,10 +2532,12 @@ async function removeAthleteRoutines(client, userId) {
   );
   const exerciseIds = [...new Set(exerciseLinks.rows.map((row) => row.exercise_id))];
 
+  await client.query('DELETE FROM set_log WHERE routine_id = ANY($1::text[])', [routineIds]);
   await client.query('DELETE FROM routine_exercise WHERE routine_id = ANY($1::text[])', [routineIds]);
   await client.query('DELETE FROM routine WHERE athlete_id = $1', [userId]);
 
   if (exerciseIds.length) {
+    await client.query('DELETE FROM overload_row WHERE exercise_id = ANY($1::text[])', [exerciseIds]);
     await client.query(
       `DELETE FROM exercise
        WHERE id = ANY($1::text[])
@@ -2281,6 +2640,16 @@ app.post('/v1/set-logs', { preHandler: authenticate }, async (request, reply) =>
   if (!routineId || !exerciseId || !Number.isInteger(setIndex) || setIndex < 0 || !Number.isInteger(reps) || reps <= 0 || (load !== null && !Number.isFinite(load))) {
     return reply.code(400).send({ error: 'Invalid set log' });
   }
+
+  const ownership = await pool.query(
+    `SELECT 1
+       FROM routine r
+       JOIN routine_exercise re ON re.routine_id = r.id AND re.exercise_id = $2
+      WHERE r.id = $1 AND r.athlete_id = $3
+      LIMIT 1`,
+    [routineId, exerciseId, request.userId],
+  );
+  if (!ownership.rows[0]) return reply.code(404).send({ error: 'El ejercicio no pertenece a esa rutina' });
 
   const result = await pool.query(
     `INSERT INTO set_log (clerk_user_id, routine_id, exercise_id, set_index, load, reps)

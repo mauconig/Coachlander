@@ -22,6 +22,7 @@ type CreatorState = {
   editingTemplateId: string | null;
   assignees: string[];
   autoOverload: boolean;
+  loadMode: 'coach' | 'ai';
   preselectWeekStart: string | null;
   setRoutineName: (name: string) => void;
   beginTemplateEdit: (templateId: string, name: string, days: CreatorDay[]) => void;
@@ -34,6 +35,7 @@ type CreatorState = {
   renameDay: (day: number, name: string) => void;
   toggleAssignee: (id: string) => void;
   setAutoOverload: (on: boolean) => void;
+  setLoadMode: (mode: 'coach' | 'ai') => void;
   seedPreselect: (clientId: string, weekStart: string) => void;
   reset: () => void;
 };
@@ -50,6 +52,7 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [autoOverload, setAutoOverload] = useState(true);
+  const [loadMode, setLoadMode] = useState<'coach' | 'ai'>('ai');
   const [preselectWeekStart, setPreselectWeekStart] = useState<string | null>(null);
 
   const setCount = useCallback((count: number) => {
@@ -68,6 +71,7 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
       editingTemplateId,
       assignees,
       autoOverload,
+      loadMode,
       preselectWeekStart,
       setRoutineName,
       beginTemplateEdit: (templateId, name, templateDays) => {
@@ -116,6 +120,7 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
       toggleAssignee: (id) =>
         setAssignees((list) => (list.includes(id) ? list.filter((item) => item !== id) : [...list, id])),
       setAutoOverload,
+      setLoadMode,
       seedPreselect: (clientId, weekStart) => {
         setAssignees([clientId]);
         setPreselectWeekStart(weekStart);
@@ -126,11 +131,12 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
         setDays([]);
         setEditingTemplateId(null);
         setAssignees([]);
+        setLoadMode('ai');
         setPreselectWeekStart(null);
         setAutoOverload(true);
       },
     }),
-    [assignees, autoOverload, days, editingTemplateId, preselectWeekStart, routineName, setCount],
+    [assignees, autoOverload, days, editingTemplateId, loadMode, preselectWeekStart, routineName, setCount],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

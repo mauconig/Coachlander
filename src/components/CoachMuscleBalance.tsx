@@ -10,6 +10,7 @@ import { color } from '@/theme/tokens';
 
 type Props = { balance: CoachMuscleBalance };
 type Region = CoachMuscleBalance['items'][number];
+const LEG_REGION_KEYS = new Set(['cuadriceps', 'gluteos', 'cadena_posterior', 'pantorrillas']);
 
 const FIGURE_WIDTH = 124;
 const FIGURE_HEIGHT = 238;
@@ -17,7 +18,10 @@ const FIGURE_HEIGHT = 238;
 export function CoachMuscleBalance({ balance }: Props) {
   const [selected, setSelected] = useState<Region | null>(null);
   const regions = useMemo(() => new Map(balance.items.map((item) => [item.key, item])), [balance.items]);
-  const fillFor = (key: string) => regionColor(regions.get(key)?.percentage ?? 0);
+  const fillFor = (key: string) => {
+    const visualKey = LEG_REGION_KEYS.has(key) ? 'piernas' : key;
+    return regionColor(regions.get(visualKey)?.percentage ?? 0);
+  };
 
   return (
     <>
@@ -25,7 +29,7 @@ export function CoachMuscleBalance({ balance }: Props) {
         <View style={styles.header}>
           <View style={styles.heading}>
             <Txt variant="eyebrow">BALANCE DE ENTRENAMIENTO</Txt>
-            <Txt variant="meta" tone={color.textMuted}>{`${balance.totalSessions} sesiones · zonas trabajadas`}</Txt>
+            <Txt variant="meta" tone={color.textMuted}>{`${balance.totalExercises} ejercicios registrados · distribución por región`}</Txt>
           </View>
           <View style={styles.scale}>
             <View style={styles.scaleLow} />
@@ -44,7 +48,7 @@ export function CoachMuscleBalance({ balance }: Props) {
           </View>
         </View>
 
-        {balance.totalSessions ? (
+        {balance.totalExercises ? (
           <View style={styles.legendGrid}>
             {balance.items.map((item) => (
               <Pressable
@@ -52,27 +56,38 @@ export function CoachMuscleBalance({ balance }: Props) {
                 onPress={() => setSelected(item)}
                 style={styles.legendItem}
                 accessibilityRole="button"
-                accessibilityLabel={`${item.label}: ${item.sessions} sesiones, ${item.percentage}%`}
+                accessibilityLabel={`${item.label}: ${item.exercises} ejercicios, ${item.percentage}%`}
               >
                 <View style={[styles.swatch, { backgroundColor: regionColor(item.percentage) }]} />
                 <View style={styles.legendText}>
                   <Txt variant="meta" numberOfLines={1}>{item.label}</Txt>
-                  <Txt variant="metaSm" tone={color.textMuted}>{`${item.sessions} sesiones · ${item.percentage}% · ${formatWeekly(item.sessionsPerWeek)}/sem`}</Txt>
+                  <Txt variant="metaSm" tone={color.textMuted}>{`${item.exercises} ${item.exercises === 1 ? 'ejercicio' : 'ejercicios'} · ${item.percentage}% · ${formatWeekly(item.exercisesPerWeek)}/sem`}</Txt>
                 </View>
               </Pressable>
             ))}
           </View>
         ) : (
-          <Txt variant="body" tone={color.textMuted} center>No hay sesiones realizadas en este período.</Txt>
+          <Txt variant="body" tone={color.textMuted} center>No hay ejercicios registrados en este período.</Txt>
         )}
-        <Txt variant="metaSm" tone={color.textFaint}>Una sesión puede trabajar varias zonas; por eso los porcentajes no tienen que sumar 100%.</Txt>
+        <Txt variant="metaSm" tone={color.textFaint}>Un ejercicio mixto cuenta completo en cada región; por eso los porcentajes pueden superar 100%.</Txt>
       </Card>
 
       <Sheet visible={!!selected} onClose={() => setSelected(null)} eyebrow="REGIÓN TRABAJADA" title={selected?.label ?? ''}>
         {selected ? (
           <View style={styles.sheetBody}>
-            <Txt variant="h3">{`${selected.sessions} sesiones · ${selected.percentage}%`}</Txt>
-            <Txt variant="body" tone={color.textMuted}>{`${formatWeekly(selected.sessionsPerWeek)} sesiones por semana en el rango elegido.`}</Txt>
+            <Txt variant="h3">{`${selected.exercises} ${selected.exercises === 1 ? 'ejercicio' : 'ejercicios'} · ${selected.percentage}%`}</Txt>
+            <Txt variant="body" tone={color.textMuted}>{`${formatWeekly(selected.exercisesPerWeek)} ejercicios por semana en el rango elegido.`}</Txt>
+            {selected.details?.length ? (
+              <View style={styles.details}>
+                <Txt variant="eyebrow">DESGLOSE DE PIERNAS</Txt>
+                {selected.details.map((detail) => (
+                  <View key={detail.key} style={styles.detailRow}>
+                    <Txt variant="meta">{detail.label}</Txt>
+                    <Txt variant="metaSm" tone={color.textMuted}>{`${detail.exercises} ${detail.exercises === 1 ? 'ejercicio' : 'ejercicios'} · ${detail.percentage}% · ${formatWeekly(detail.exercisesPerWeek)}/sem`}</Txt>
+                  </View>
+                ))}
+              </View>
+            ) : null}
           </View>
         ) : null}
       </Sheet>
@@ -154,4 +169,6 @@ const styles = StyleSheet.create({
   swatch: { width: 12, height: 12, borderRadius: 4, borderWidth: 1, borderColor: color.border },
   legendText: { flex: 1, gap: 2 },
   sheetBody: { gap: 6 },
+  details: { gap: 8, marginTop: 8 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
 });

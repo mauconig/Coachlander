@@ -39,6 +39,18 @@ CREATE TABLE IF NOT EXISTS exercise (
 ALTER TABLE exercise
   ADD COLUMN IF NOT EXISTS muscle_groups TEXT[] NOT NULL DEFAULT '{}';
 
+ALTER TABLE exercise
+  ADD COLUMN IF NOT EXISTS load_source TEXT NOT NULL DEFAULT 'coach';
+
+ALTER TABLE exercise
+  ADD COLUMN IF NOT EXISTS load_reason TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE exercise
+  ADD COLUMN IF NOT EXISTS progression_metric TEXT NOT NULL DEFAULT 'load';
+
+ALTER TABLE exercise
+  ADD COLUMN IF NOT EXISTS target_reps INTEGER NOT NULL DEFAULT 0;
+
 CREATE TABLE IF NOT EXISTS routine (
   id TEXT PRIMARY KEY,
   plan_id TEXT,
@@ -61,6 +73,9 @@ ALTER TABLE routine
 
 ALTER TABLE routine
   ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+
+ALTER TABLE routine
+  ADD COLUMN IF NOT EXISTS load_mode TEXT NOT NULL DEFAULT 'coach';
 
 CREATE INDEX IF NOT EXISTS idx_routine_athlete_plan
   ON routine (athlete_id, plan_id);
@@ -164,6 +179,9 @@ CREATE TABLE IF NOT EXISTS template_exercise (
 
 ALTER TABLE template_exercise
   ADD COLUMN IF NOT EXISTS note TEXT;
+
+ALTER TABLE template_exercise
+  ADD COLUMN IF NOT EXISTS progression_metric TEXT NOT NULL DEFAULT 'load';
 
 CREATE TABLE IF NOT EXISTS thread (
   client_id TEXT PRIMARY KEY REFERENCES client(id),

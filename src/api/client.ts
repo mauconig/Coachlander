@@ -151,6 +151,11 @@ export type CoachHistoryExercise = {
   name: string;
   plannedSets: number;
   scheme: string;
+  suggested: number;
+  loadSource: 'ai' | 'coach';
+  loadReason: string;
+  progressionMetric: 'load' | 'reps' | 'seconds';
+  targetReps: number;
   sets: CoachHistorySet[];
 };
 
@@ -161,6 +166,7 @@ export type CoachHistoryDetail = {
   date: string;
   name: string;
   minutes: number;
+  loadMode: 'ai' | 'coach';
   exercises: CoachHistoryExercise[];
 };
 
@@ -223,19 +229,35 @@ export type CoachWeekdayActivityItem = {
 
 export type CoachMuscleBalance = {
   totalSessions: number;
+  totalExercises: number;
   weeks: Array<{
     weekStart: string;
     daysIncluded: number;
     sessions: number;
     normalizedSessions: number;
   }>;
-  items: Array<{
+  items: Array<CoachMuscleBalanceItem>;
+};
+
+export type CoachMuscleBalanceDetail = {
+  key: string;
+  label: string;
+  exercises: number;
+  exercisesPerWeek: number;
+  percentage: number;
+  sessions?: number;
+  sessionsPerWeek?: number;
+};
+
+export type CoachMuscleBalanceItem = {
     key: string;
     label: string;
-    sessions: number;
-    sessionsPerWeek: number;
+    exercises: number;
+    exercisesPerWeek: number;
     percentage: number;
-  }>;
+    details?: CoachMuscleBalanceDetail[];
+    sessions?: number;
+    sessionsPerWeek?: number;
 };
 
 export type CoachExerciseLibraryItem = {
@@ -296,11 +318,87 @@ function coachStatsQuery(params: { clientId: string | null; from: string; to: st
   return query.toString();
 }
 
+const PRIMARY_MUSCLE_KEYS = ['pecho', 'espalda', 'espalda_baja', 'hombros', 'brazos', 'piernas', 'core', 'otros'] as const;
+const LEG_MUSCLE_KEYS = ['cuadriceps', 'gluteos', 'cadena_posterior', 'pantorrillas'] as const;
+const PRIMARY_MUSCLE_LABELS: Record<(typeof PRIMARY_MUSCLE_KEYS)[number], string> = {
+  pecho: 'Pecho',
+  espalda: 'Espalda',
+  espalda_baja: 'Espalda baja',
+  hombros: 'Hombros',
+  brazos: 'Brazos',
+  piernas: 'Piernas',
+  core: 'Core',
+  otros: 'Otros',
+};
+
+function normalizeCoachMuscleBalance(balance: CoachMuscleBalance): CoachMuscleBalance {
+  const sourceItems = Array.isArray(balance?.items) ? balance.items : [];
+  const byKey = new Map(sourceItems.map((item) => [item.key, item]));
+  const metric = (item: Partial<CoachMuscleBalanceItem> | undefined) => Number(item?.exercises ?? item?.sessions) || 0;
+  const weeklyMetric = (item: Partial<CoachMuscleBalanceItem> | undefined) => Number(item?.exercisesPerWeek ?? item?.sessionsPerWeek) || 0;
+  const fallbackTotal = sourceItems.reduce((total, item) => total + metric(item), 0);
+  const totalExercises = Number.isFinite(Number(balance?.totalExercises))
+    ? Number(balance.totalExercises)
+    : fallbackTotal;
+  const percentageFor = (count: number) => totalExercises ? Math.round((count / totalExercises) * 100) : 0;
+
+  const makeDetail = (key: string, raw?: Partial<CoachMuscleBalanceDetail>): CoachMuscleBalanceDetail => {
+    const exercises = metric(raw);
+    return {
+      key,
+      label: raw?.label ?? key,
+      exercises,
+      exercisesPerWeek: weeklyMetric(raw),
+      percentage: percentageFor(exercises),
+      sessions: exercises,
+      sessionsPerWeek: weeklyMetric(raw),
+    };
+  };
+
+  const rawLegs = byKey.get('piernas');
+  const rawDetails = rawLegs?.details?.length
+    ? rawLegs.details
+    : LEG_MUSCLE_KEYS.map((key) => byKey.get(key)).filter(Boolean) as CoachMuscleBalanceDetail[];
+  const generatedLegExercises = rawDetails.reduce((total, item) => total + metric(item), 0);
+  const generatedLegs: CoachMuscleBalanceItem = {
+    key: 'piernas',
+    label: PRIMARY_MUSCLE_LABELS.piernas,
+    exercises: metric(rawLegs) || generatedLegExercises,
+    exercisesPerWeek: weeklyMetric(rawLegs) || rawDetails.reduce((total, item) => total + weeklyMetric(item), 0),
+    percentage: percentageFor(metric(rawLegs) || generatedLegExercises),
+    details: rawDetails.map((item) => makeDetail(item.key, item)),
+    sessions: metric(rawLegs) || generatedLegExercises,
+    sessionsPerWeek: weeklyMetric(rawLegs) || rawDetails.reduce((total, item) => total + weeklyMetric(item), 0),
+  };
+
+  return {
+    totalSessions: Number(balance?.totalSessions) || 0,
+    totalExercises,
+    weeks: Array.isArray(balance?.weeks) ? balance.weeks : [],
+    items: PRIMARY_MUSCLE_KEYS.map((key) => {
+      if (key === 'piernas') return generatedLegs;
+      const raw = byKey.get(key);
+      const exercises = metric(raw);
+      const exercisesPerWeek = weeklyMetric(raw);
+      return {
+        key,
+        label: raw?.label ?? PRIMARY_MUSCLE_LABELS[key],
+        exercises,
+        exercisesPerWeek,
+        percentage: percentageFor(exercises),
+        sessions: exercises,
+        sessionsPerWeek: exercisesPerWeek,
+      };
+    }),
+  };
+}
+
 export function getCoachStatistics(
   tokenProvider: TokenProvider,
   params: { clientId: string | null; from: string; to: string },
 ) {
-  return request<CoachStatistics>(tokenProvider, `/v1/coach/statistics?${coachStatsQuery(params)}`);
+  return request<CoachStatistics>(tokenProvider, `/v1/coach/statistics?${coachStatsQuery(params)}`)
+    .then((stats) => ({ ...stats, muscleBalance: normalizeCoachMuscleBalance(stats.muscleBalance) }));
 }
 
 export function getCoachExerciseLibrary(
@@ -422,6 +520,7 @@ export type TemplateExerciseInput = {
   sets: number;
   reps: string;
   loadKg: number | null;
+  progressionMetric?: 'load' | 'reps' | 'seconds';
   /** Kept for the importer/legacy create flow; coach-facing template editing omits it. */
   restSeconds?: number;
   note?: string;
@@ -478,7 +577,14 @@ export function deleteTemplate(tokenProvider: TokenProvider, templateId: string)
 export function assignTemplate(
   tokenProvider: TokenProvider,
   templateId: string,
-  input: { clientIds: string[]; autoOverload: boolean; week: number; weekStart: string; replace?: boolean },
+  input: {
+    clientIds: string[];
+    autoOverload: boolean;
+    loadMode: 'coach' | 'ai';
+    week: number;
+    weekStart: string;
+    replace?: boolean;
+  },
 ) {
   return request<{ ok: true; results: { clientId: string; planId: string; routineIds: string[] }[] }>(
     tokenProvider,

@@ -84,6 +84,9 @@ export function CoachHistoryDetailSheet({ visible, session, tokenProvider, onClo
                 <View style={styles.exerciseTitle}>
                   <Txt variant="h5" numberOfLines={2}>{`${index + 1}. ${exercise.name}`}</Txt>
                   <Txt variant="meta" tone={color.textFaint}>{exercise.scheme}</Txt>
+                  <Txt variant="metaSm" tone={exercise.loadSource === 'ai' ? color.violet : color.textMuted} numberOfLines={2}>
+                    {`${exercise.loadSource === 'ai' ? 'IA' : 'ENTRENADOR'} · ${exercise.suggested > 0 ? weight(exercise.suggested) : 'Peso corporal'} · ${exercise.loadReason || 'Carga definida en el plan.'}`}
+                  </Txt>
                 </View>
                 <Txt variant="labelTight" tone={color.textMuted}>
                   {`${exercise.sets.length || exercise.plannedSets} SERIES`}

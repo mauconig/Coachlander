@@ -7,6 +7,7 @@ import { assignTemplate, updateRoutine, type UpdateRoutineInput } from '@/api/cl
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { CoachLoadModePicker, type CoachLoadMode } from '@/components/CoachLoadModePicker';
 import { Field } from '@/components/Field';
 import { Icon } from '@/components/Icon';
 import { Row } from '@/components/Row';
@@ -17,9 +18,9 @@ import { StatTile } from '@/components/StatTile';
 import { BackButton } from '@/components/TopBar';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
-import { getClient, getCurrentWeekStart, getExercises, getRoutineById, getTemplates, weekIndexOf } from '@/db/queries';
+import { getClient, getCurrentWeekStart, getExercises, getOverloadRows, getRoutineById, getTemplates, weekIndexOf } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
-import type { Exercise } from '@/data/types';
+import type { Exercise, OverloadRow } from '@/data/types';
 import { num } from '@/lib/format';
 import { useApp } from '@/state/AppState';
 import { useRefreshRemoteData } from '@/state/RemoteState';
@@ -74,6 +75,10 @@ function blankDraft(focus: string): DraftExercise {
     focus,
     cues: '',
     overload: null,
+    loadSource: 'coach',
+    loadReason: 'Carga definida por el entrenador.',
+    progressionMetric: 'load',
+    targetReps: 8,
     reps: '8',
   };
 }
@@ -145,6 +150,14 @@ export default function RoutineDetail() {
   const refreshRemoteData = useRefreshRemoteData();
   const routine = useQuery((data) => getRoutineById(data, id), [id]);
   const client = useQuery((data) => getClient(data, clientId), [clientId]);
+  const progressionByExercise = useQuery((data) => {
+    const result: Record<string, OverloadRow | undefined> = {};
+    for (const exercise of routine?.exercises ?? []) {
+      const rows = getOverloadRows(data, exercise.id);
+      result[exercise.id] = rows[rows.length - 1];
+    }
+    return result;
+  }, [routine?.id]);
   const templates = useQuery(getTemplates);
   const catalog = useQuery(getExercises);
   const [draft, setDraft] = useState<DraftExercise[]>([]);
@@ -155,6 +168,8 @@ export default function RoutineDetail() {
   const [addOpen, setAddOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  const [loadMode, setLoadMode] = useState<CoachLoadMode>('ai');
 
   useEffect(() => {
     if (!routine) return;
@@ -245,19 +260,21 @@ export default function RoutineDetail() {
     }
   };
 
-  const assignExisting = async (templateId: string) => {
+  const assignExisting = async (templateId: string, selectedLoadMode: CoachLoadMode) => {
     if (assigningId || !clientId || !weekStart) return;
     setAssigningId(templateId);
     try {
       await assignTemplate(getToken, templateId, {
         clientIds: [clientId],
         autoOverload: true,
+        loadMode: selectedLoadMode,
         week: weekIndexOf(weekStart),
         weekStart,
         replace: true,
       });
       await refreshRemoteData();
       setChangeOpen(false);
+      setPendingTemplateId(null);
       router.back();
     } catch (assignError: unknown) {
       Alert.alert('No pudimos cambiar la rutina', assignError instanceof Error ? assignError.message : 'Probá nuevamente.');
@@ -317,6 +334,14 @@ export default function RoutineDetail() {
               <Txt variant="meta" tone={color.textMuted}>Ajustes exclusivos para {studentName}</Txt>
             </View>
           </View>
+          <View style={styles.loadAudit}>
+            <Txt variant="labelTight" tone={routine.loadMode === 'ai' ? color.violet : color.lime}>
+              {routine.loadMode === 'ai' ? 'CARGAS CALCULADAS POR IA' : 'CARGAS DEFINIDAS POR EL ENTRENADOR'}
+            </Txt>
+            <Txt variant="meta" tone={color.textMuted}>
+              Cada ejercicio conserva la última actuación y el motivo de la próxima recomendación.
+            </Txt>
+          </View>
           <View style={styles.stats}>
             <StatTile compact value={`${routine.estimatedMinutes} min`} label="DURACIÓN" />
             <StatTile compact value={String(totalSets)} label="SERIES" />
@@ -337,6 +362,7 @@ export default function RoutineDetail() {
               index={index}
               total={exercises.length}
               unit={unit}
+              progression={progressionByExercise[exercise.id]}
               onPress={() => setEditingId(exercise.id)}
               onMove={(delta) => moveExercise(index, delta)}
             />
@@ -391,9 +417,23 @@ export default function RoutineDetail() {
             meta={template.meta}
             trailing={assigningId === template.id ? 'ASIGNANDO' : 'ASIGNAR'}
             trailingTone={assigningId === template.id ? color.lime : color.text}
-            onPress={() => void assignExisting(template.id)}
+            onPress={() => setPendingTemplateId(template.id)}
           />
         ))}
+      </Sheet>
+
+      <Sheet
+        visible={!!pendingTemplateId}
+        onClose={() => setPendingTemplateId(null)}
+        eyebrow="CAMBIAR RUTINA"
+        title="¿Quién define las cargas?"
+      >
+        <CoachLoadModePicker value={loadMode} onChange={setLoadMode} />
+        <Button
+          label={assigningId ? 'Asignando…' : 'Continuar'}
+          onPress={() => pendingTemplateId && void assignExisting(pendingTemplateId, loadMode)}
+          disabled={!!assigningId}
+        />
       </Sheet>
     </>
   );
@@ -412,6 +452,7 @@ function ExerciseRow({
   index,
   total,
   unit,
+  progression,
   onPress,
   onMove,
 }: {
@@ -419,10 +460,16 @@ function ExerciseRow({
   index: number;
   total: number;
   unit: 'kg' | 'lb';
+  progression?: OverloadRow;
   onPress: () => void;
   onMove: (delta: -1 | 1) => void;
 }) {
   const load = exercise.suggested > 0 ? `${num(exercise.suggested)} ${unit}` : 'PC';
+  const progressionLabel = progression
+    ? exercise.progressionMetric === 'load'
+      ? `Última ${num(progression.lastLoad)} ${unit} → próxima ${num(progression.nextLoad)} ${unit}`
+      : `Último ${progression.lastReps}${exercise.progressionMetric === 'seconds' ? ' s' : ' reps'} → próximo ${progression.nextReps}${exercise.progressionMetric === 'seconds' ? ' s' : ' reps'}`
+    : 'Todavía no hay una actuación registrada';
   return (
     <View style={styles.exerciseRow}>
       <Pressable style={({ pressed }) => [styles.exerciseMain, pressed && styles.pressed]} onPress={onPress}>
@@ -430,6 +477,10 @@ function ExerciseRow({
           <Txt variant="labelTight" tone={color.violet}>{String(index + 1).padStart(2, '0')}</Txt>
         </View>
         <View style={styles.exerciseCopy}>
+          <Txt variant="metaSm" tone={exercise.loadSource === 'ai' ? color.violet : color.textFaint} numberOfLines={1}>
+            {`${exercise.loadSource === 'ai' ? 'IA' : 'ENTRENADOR'} · ${exercise.loadReason || 'Carga definida en el plan.'}`}
+          </Txt>
+          <Txt variant="metaSm" tone={color.textMuted} numberOfLines={1}>{progressionLabel}</Txt>
           <Txt variant="rowTitle" numberOfLines={1}>{exercise.name || 'Ejercicio sin nombre'}</Txt>
           <Txt variant="meta" tone={color.textMuted} numberOfLines={1}>
             {`${exercise.sets} series · ${exercise.reps} reps · ${load}`}
@@ -672,6 +723,7 @@ const styles = StyleSheet.create({
   },
   dayCopy: { flex: 1, gap: 3 },
   stats: { flexDirection: 'row', gap: 8 },
+  loadAudit: { gap: 4, paddingTop: 2 },
   sectionHeader: { gap: 7 },
   list: { gap: 9 },
   exerciseRow: {
