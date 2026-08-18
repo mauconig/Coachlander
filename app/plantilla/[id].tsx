@@ -130,7 +130,7 @@ export default function TemplateDetail() {
                   key={exercise.id}
                   left={<Txt variant="labelTight" tone={color.lime}>{String(index + 1).padStart(2, '0')}</Txt>}
                   title={exercise.name}
-                  meta={`${exercise.sets} × ${exercise.reps}${exercise.loadKg !== null ? ` · ${exercise.loadKg} kg` : ''}`}
+                  meta={`${exercise.sets} × ${exercise.reps}`}
                 />
               ))}
             </View>
@@ -209,6 +209,28 @@ function AssignTemplateSheet({
     }
   };
 
+  const continueAssignment = () => {
+    if (!selected.length) {
+      setError('Elegí al menos un alumno.');
+      return;
+    }
+    if (loadMode === 'coach') {
+      onClose();
+      router.push({
+        pathname: '/crear/cargas',
+        params: {
+          templateId,
+          clientIds: selected.join(','),
+          returnTo: 'template',
+          week: String(weekIndexOf(week.weekStart)),
+          weekStart: week.weekStart,
+        },
+      });
+      return;
+    }
+    void save();
+  };
+
   return (
     <Sheet visible={visible} onClose={onClose} eyebrow="PLANTILLA" title="Asignar a alumnos">
       <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps="handled">
@@ -247,7 +269,11 @@ function AssignTemplateSheet({
         />
 
         {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}
-        <Button label={saving ? 'Asignando…' : 'Asignar rutina'} onPress={() => void save()} disabled={saving} />
+        <Button
+          label={saving ? 'Asignando…' : loadMode === 'coach' ? 'Continuar con cargas' : 'Asignar rutina'}
+          onPress={continueAssignment}
+          disabled={saving}
+        />
       </ScrollView>
     </Sheet>
   );

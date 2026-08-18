@@ -103,7 +103,7 @@ export default function AssignCreatedRoutine() {
           name: e.name.trim(),
           sets: e.sets,
           reps: e.reps,
-          loadKg: e.loadKg,
+          loadKg: null,
           note: e.note.trim(),
         })),
       }));
@@ -187,6 +187,25 @@ export default function AssignCreatedRoutine() {
   const publish = () => {
     if (isSoloAthlete) return publishSolo();
     return publishCoach(true);
+  };
+
+  const openCoachLoadEditor = () => {
+    if (!count) {
+      setError('Elegí al menos un alumno antes de definir las cargas.');
+      return;
+    }
+    if (!days.some((day) => day.exercises.length > 0)) {
+      setError('Agregá al menos un ejercicio antes de definir las cargas.');
+      return;
+    }
+    router.push({
+      pathname: '/crear/cargas',
+      params: {
+        clientIds: assignees.join(','),
+        week: String(weekIndexOf(selectedWeek.weekStart)),
+        weekStart: selectedWeek.weekStart,
+      },
+    });
   };
 
   if (saving) {
@@ -286,8 +305,12 @@ export default function AssignCreatedRoutine() {
           ) : (
             <>
               <Button
-                label={count ? `Marcar como completada · ${count} ${count === 1 ? 'alumno' : 'alumnos'}` : 'Guardar como plantilla'}
-                onPress={() => publishCoach(true)}
+                label={count
+                  ? loadMode === 'coach'
+                    ? `Definir cargas y asignar · ${count} ${count === 1 ? 'alumno' : 'alumnos'}`
+                    : `Marcar como completada · ${count} ${count === 1 ? 'alumno' : 'alumnos'}`
+                  : 'Guardar como plantilla'}
+                onPress={() => (count && loadMode === 'coach' ? openCoachLoadEditor() : publishCoach(true))}
               />
               {count ? (
                 <Pressable onPress={() => publishCoach(false)} accessibilityRole="button">

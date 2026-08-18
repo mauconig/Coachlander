@@ -262,6 +262,20 @@ export default function RoutineDetail() {
 
   const assignExisting = async (templateId: string, selectedLoadMode: CoachLoadMode) => {
     if (assigningId || !clientId || !weekStart) return;
+    if (selectedLoadMode === 'coach') {
+      setPendingTemplateId(null);
+      router.push({
+        pathname: '/crear/cargas',
+        params: {
+          templateId,
+          clientIds: clientId,
+          returnTo: 'routine',
+          week: String(weekIndexOf(weekStart)),
+          weekStart,
+        },
+      });
+      return;
+    }
     setAssigningId(templateId);
     try {
       await assignTemplate(getToken, templateId, {
@@ -430,7 +444,7 @@ export default function RoutineDetail() {
       >
         <CoachLoadModePicker value={loadMode} onChange={setLoadMode} />
         <Button
-          label={assigningId ? 'Asignando…' : 'Continuar'}
+          label={assigningId ? 'Asignando…' : loadMode === 'coach' ? 'Continuar con cargas' : 'Asignar rutina'}
           onPress={() => pendingTemplateId && void assignExisting(pendingTemplateId, loadMode)}
           disabled={!!assigningId}
         />

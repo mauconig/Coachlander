@@ -157,11 +157,11 @@ DECLARE
   has_previous BOOLEAN;
 BEGIN
   FOR c IN
-    SELECT c.id, c.clerk_user_id AS athlete_id,
-           row_number() OVER (ORDER BY c.position)::INTEGER AS client_no
-    FROM client c
-    WHERE c.id IN ('client-lucia', 'client-mateo', 'client-valentina', 'client-joaquin', 'client-camila')
-    ORDER BY c.position
+    SELECT client_row.id, client_row.clerk_user_id AS athlete_id,
+           row_number() OVER (ORDER BY client_row.position)::INTEGER AS client_no
+    FROM client AS client_row
+    WHERE client_row.id IN ('client-lucia', 'client-mateo', 'client-valentina', 'client-joaquin', 'client-camila')
+    ORDER BY client_row.position
   LOOP
     client_no := c.client_no;
 

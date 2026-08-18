@@ -581,6 +581,7 @@ export function assignTemplate(
     clientIds: string[];
     autoOverload: boolean;
     loadMode: 'coach' | 'ai';
+    coachLoads?: CoachAssignmentLoad[];
     week: number;
     weekStart: string;
     replace?: boolean;
@@ -592,6 +593,13 @@ export function assignTemplate(
     { method: 'POST', body: JSON.stringify(input) },
   );
 }
+
+export type CoachAssignmentLoad = {
+  clientId: string;
+  day: number;
+  position: number;
+  loadKg: number;
+};
 
 export type UpdateExerciseInput = {
   suggested: number;

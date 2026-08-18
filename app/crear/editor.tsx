@@ -198,7 +198,7 @@ function ExerciseItem({
           </Pressable>
         }
         title={exercise.name}
-                meta={`${exercise.sets} × ${exercise.reps}${exercise.loadKg !== null ? ` · ${exercise.loadKg} kg` : ''}`}
+        meta={`${exercise.sets} × ${exercise.reps}`}
         chevron
         onPress={onPress}
         active={isActive}
@@ -274,24 +274,6 @@ function ExerciseEditor({
           label="REPS"
           value={exercise.reps}
           onStep={(d) => onPatch({ reps: `${Math.max(1, repsNumber + d)}` })}
-        />
-      </View>
-
-      <View style={styles.loadField}>
-        <Txt variant="metaSm" tone={color.textMuted}>
-          CARGA (KG)
-        </Txt>
-        <TextInput
-          value={exercise.loadKg === null ? '' : String(exercise.loadKg)}
-          onChangeText={(value) => {
-            const normalized = value.replace(',', '.');
-            onPatch({ loadKg: normalized.trim() ? Number(normalized) || 0 : null });
-          }}
-          placeholder="Opcional"
-          placeholderTextColor={color.textFaint}
-          selectionColor={color.lime}
-          keyboardType="decimal-pad"
-          style={styles.loadInput}
         />
       </View>
 
@@ -413,20 +395,6 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   steppers: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  loadField: {
-    backgroundColor: color.screen,
-    borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: radius.xs,
-    padding: 11,
-    gap: 5,
-  },
-  loadInput: {
-    color: color.text,
-    fontFamily: font.mono,
-    fontSize: 17,
-    paddingVertical: 2,
-  },
   stepper: {
     flex: 1,
     minWidth: 90,

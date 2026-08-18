@@ -1311,6 +1311,49 @@ function normalizedLoad(value) {
   return Math.round(number * 2) / 2;
 }
 
+function coachLoadKey(clientId, day, position) {
+  return `${clientId}:${day}:${position}`;
+}
+
+function parseCoachLoads(rawLoads, clientIds, days) {
+  if (!Array.isArray(rawLoads)) {
+    throw new Error('Faltan las cargas definidas por el entrenador');
+  }
+
+  const selectedClients = new Set(clientIds);
+  const expected = new Set();
+  for (const day of days) {
+    for (const exercise of day.exercises) {
+      for (const clientId of selectedClients) expected.add(coachLoadKey(clientId, day.day, exercise.position));
+    }
+  }
+
+  const loads = new Map();
+  for (const entry of rawLoads) {
+    const clientId = textValue(entry?.clientId);
+    const day = Number(entry?.day);
+    const position = Number(entry?.position);
+    const rawLoad = entry?.loadKg;
+    const numericLoad = Number(rawLoad);
+    const loadKg = normalizedLoad(rawLoad);
+    const key = coachLoadKey(clientId, day, position);
+
+    if (!selectedClients.has(clientId) || !Number.isInteger(day) || !Number.isInteger(position) || !expected.has(key)) {
+      throw new Error('La carga referencia un ejercicio o alumno inválido');
+    }
+    if (loadKg === null || Math.abs(numericLoad * 2 - Math.round(numericLoad * 2)) > 1e-9) {
+      throw new Error('Las cargas deben ser números entre 0 y 500 kg, en pasos de 0,5 kg');
+    }
+    if (loads.has(key)) throw new Error('Hay cargas repetidas para el mismo ejercicio');
+    loads.set(key, loadKg);
+  }
+
+  for (const key of expected) {
+    if (!loads.has(key)) throw new Error('Completá todas las cargas antes de asignar la rutina');
+  }
+  return loads;
+}
+
 function normalizedInteger(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -1881,7 +1924,7 @@ app.post('/v1/templates', { preHandler: authenticate }, async (request, reply) =
         `INSERT INTO template_exercise
            (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note, progression_metric)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [templateId, day.day, index, exercise.name, exercise.sets, exercise.reps, exercise.load, exercise.rest, exercise.note || null, exercise.progressionMetric],
+          [templateId, day.day, index, exercise.name, exercise.sets, exercise.reps, null, exercise.rest, exercise.note || null, exercise.progressionMetric],
         );
       }
     }
@@ -1959,7 +2002,7 @@ app.patch('/v1/templates/:id', { preHandler: authenticate }, async (request, rep
             exercise.name,
             exercise.sets,
             exercise.reps,
-            exercise.load,
+            null,
             restByPosition.get(`${day.day}:${index}`)?.rest ?? 90,
             exercise.note || null,
             restByPosition.get(`${day.day}:${index}`)?.metric ?? exercise.progressionMetric,
@@ -1996,9 +2039,10 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   if (profile.role !== 'coach') return reply.code(403).send({ error: 'Solo un entrenador puede asignar plantillas' });
 
   const templateId = textValue(request.params?.id);
-  const clientIds = Array.isArray(request.body?.clientIds)
+  const requestedClientIds = Array.isArray(request.body?.clientIds)
     ? request.body.clientIds.filter((id) => typeof id === 'string')
     : [];
+  const clientIds = [...new Set(requestedClientIds)];
   if (!templateId) return reply.code(400).send({ error: 'Falta la plantilla a asignar' });
   if (!clientIds.length) return reply.code(400).send({ error: 'Elegí al menos un alumno' });
 
@@ -2034,6 +2078,16 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
     if (!days.length) {
       await client.query('ROLLBACK');
       return reply.code(404).send({ error: 'La plantilla no tiene ejercicios' });
+    }
+
+    let coachLoads = new Map();
+    if (loadMode === 'coach') {
+      try {
+        coachLoads = parseCoachLoads(request.body?.coachLoads, clientIds, days);
+      } catch (error) {
+        await client.query('ROLLBACK');
+        return reply.code(400).send({ error: error.message });
+      }
     }
 
     const results = [];
@@ -2076,7 +2130,15 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
         for (const [position, exercise] of day.exercises.entries()) {
           const exerciseId = `exercise-${randomUUID()}`;
           const note = typeof exercise.note === 'string' && exercise.note.trim() ? exercise.note.trim() : '';
-          const metric = progressionMetricFor(exercise.name, exercise.reps, exercise.load_kg, exercise.progression_metric);
+          const coachLoad = loadMode === 'coach'
+            ? coachLoads.get(coachLoadKey(clientId, day.day, exercise.position))
+            : null;
+          const metric = progressionMetricFor(
+            exercise.name,
+            exercise.reps,
+            loadMode === 'coach' ? coachLoad : exercise.load_kg,
+            exercise.progression_metric,
+          );
           const decision = loadMode === 'ai'
             ? await calculateAiLoadDecision(client, {
                 athleteId,
@@ -2086,15 +2148,15 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
                 fallbackLoad: exercise.load_kg,
                 weightKg,
                 progressionMetric: metric,
-              })
+            })
             : {
-                loadKg: exercise.load_kg ?? 0,
+                loadKg: coachLoad,
                 reps: exercise.reps,
                 targetReps: targetValueFromReps(exercise.reps),
                 metric,
                 previousLoad: null,
                 previousReps: null,
-                reason: 'Carga definida por el entrenador.',
+                reason: 'Carga definida por el entrenador al asignar.',
               };
           const suggested = decision.loadKg ?? 0;
           await client.query(
