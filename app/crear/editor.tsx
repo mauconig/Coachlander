@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 
@@ -9,6 +9,8 @@ import { Row } from '@/components/Row';
 import { Screen } from '@/components/Screen';
 import { TopBar } from '@/components/TopBar';
 import { Txt } from '@/components/Txt';
+import { getTemplateById } from '@/db/queries';
+import { useQuery } from '@/db/useQuery';
 import type { CreatorExercise } from '@/state/CreatorState';
 import { useCreator } from '@/state/CreatorState';
 import { font } from '@/theme/type';
@@ -16,10 +18,43 @@ import { GUTTER, color, radius } from '@/theme/tokens';
 
 /** 22 · Editor del creador — días y ejercicios reordenables con arrastre. */
 export default function RoutineCreatorEditor() {
-  const { days, updateExercise, removeExercise, moveExercise, replaceExercises, renameDay } =
-    useCreator();
+  const { templateId: rawTemplateId } = useLocalSearchParams<{ templateId?: string }>();
+  const templateId = Array.isArray(rawTemplateId) ? rawTemplateId[0] : rawTemplateId;
+  const template = useQuery((data) => (templateId ? getTemplateById(data, templateId) : null), [templateId]);
+  const {
+    days,
+    beginTemplateEdit,
+    updateExercise,
+    removeExercise,
+    moveExercise,
+    replaceExercises,
+    renameDay,
+  } = useCreator();
+  const loadedTemplateId = useRef<string | null>(null);
   const [activeDay, setActiveDay] = useState(1);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!templateId || !template || loadedTemplateId.current === templateId) return;
+    beginTemplateEdit(
+      template.id,
+      template.name,
+      template.days.map((day) => ({
+        day: day.day,
+        name: day.name,
+        exercises: day.exercises.map((exercise) => ({
+          id: exercise.id,
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          loadKg: exercise.loadKg,
+          restSeconds: 90,
+          note: exercise.note,
+        })),
+      })),
+    );
+    loadedTemplateId.current = templateId;
+  }, [beginTemplateEdit, template, templateId]);
 
   const day = days.find((d) => d.day === activeDay) ?? { day: activeDay, name: `Día ${activeDay}`, exercises: [] };
 
@@ -163,7 +198,7 @@ function ExerciseItem({
           </Pressable>
         }
         title={exercise.name}
-                meta={`${exercise.sets} × ${exercise.reps}`}
+                meta={`${exercise.sets} × ${exercise.reps}${exercise.loadKg !== null ? ` · ${exercise.loadKg} kg` : ''}`}
         chevron
         onPress={onPress}
         active={isActive}
@@ -213,9 +248,15 @@ function ExerciseEditor({
         >
           <Icon name="grip" size={16} tone={color.textMuted} />
         </Pressable>
-        <Txt variant="rowTitle" style={styles.editTitle}>
-          {exercise.name}
-        </Txt>
+        <TextInput
+          value={exercise.name}
+          onChangeText={(name) => onPatch({ name })}
+          placeholder="Nombre del ejercicio"
+          placeholderTextColor={color.textFaint}
+          selectionColor={color.lime}
+          autoCorrect={false}
+          style={styles.exerciseNameInput}
+        />
         <Pressable onPress={onClose} accessibilityRole="button">
           <Txt variant="labelTight" tone={color.lime}>
             LISTO
@@ -233,6 +274,24 @@ function ExerciseEditor({
           label="REPS"
           value={exercise.reps}
           onStep={(d) => onPatch({ reps: `${Math.max(1, repsNumber + d)}` })}
+        />
+      </View>
+
+      <View style={styles.loadField}>
+        <Txt variant="metaSm" tone={color.textMuted}>
+          CARGA (KG)
+        </Txt>
+        <TextInput
+          value={exercise.loadKg === null ? '' : String(exercise.loadKg)}
+          onChangeText={(value) => {
+            const normalized = value.replace(',', '.');
+            onPatch({ loadKg: normalized.trim() ? Number(normalized) || 0 : null });
+          }}
+          placeholder="Opcional"
+          placeholderTextColor={color.textFaint}
+          selectionColor={color.lime}
+          keyboardType="decimal-pad"
+          style={styles.loadInput}
         />
       </View>
 
@@ -346,8 +405,28 @@ const styles = StyleSheet.create({
   rowActive: { borderColor: color.lime, opacity: 0.85 },
   dragHandle: { alignItems: 'center', justifyContent: 'center' },
   editHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  editTitle: { flex: 1, fontSize: 16 },
+  exerciseNameInput: {
+    flex: 1,
+    color: color.text,
+    fontFamily: font.uiSemi,
+    fontSize: 16,
+    paddingVertical: 2,
+  },
   steppers: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  loadField: {
+    backgroundColor: color.screen,
+    borderWidth: 1,
+    borderColor: color.border,
+    borderRadius: radius.xs,
+    padding: 11,
+    gap: 5,
+  },
+  loadInput: {
+    color: color.text,
+    fontFamily: font.mono,
+    fontSize: 17,
+    paddingVertical: 2,
+  },
   stepper: {
     flex: 1,
     minWidth: 90,

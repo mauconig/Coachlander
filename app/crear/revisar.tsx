@@ -13,7 +13,7 @@ import { color, radius } from '@/theme/tokens';
 
 /** 23 · Revisión — resumen de la rutina antes de guardar. */
 export default function CreatorReview() {
-  const { routineName, days } = useCreator();
+  const { routineName, days, editingTemplateId } = useCreator();
 
   const totalExercises = days.reduce((n, d) => n + d.exercises.length, 0);
   const totalSets = days.reduce((n, d) => n + d.exercises.reduce((s, e) => s + e.sets, 0), 0);
@@ -39,7 +39,7 @@ export default function CreatorReview() {
 
       <Card tone="violet" radius={radius.xxl} padding={18} gap={10}>
         <Txt variant="label" tone={color.onViolet}>
-          RUTINA CREADA
+          {editingTemplateId ? 'RUTINA EDITADA' : 'RUTINA CREADA'}
         </Txt>
         <Txt variant="h3">{routineName.trim() || 'Rutina sin nombre'}</Txt>
         <Txt variant="body" tone={color.onVioletStrong}>

@@ -42,6 +42,8 @@ const bootstrapTables = [
   'month_day',
   'setting',
   'template',
+  'template_day',
+  'template_exercise',
   'thread',
   'import_line',
   'app_meta',
@@ -60,6 +62,8 @@ const orderBy = {
   month_day: 'day_index',
   setting: 'position, id',
   template: 'position',
+  template_day: 'template_id, day',
+  template_exercise: 'template_id, day, position',
   thread: 'position',
   import_line: 'position',
   app_meta: 'key',
@@ -660,7 +664,8 @@ app.post('/v1/templates', { preHandler: authenticate }, async (request, reply) =
     return reply.code(400).send({ error: 'La rutina debe tener entre 1 y 7 días' });
   }
 
-  await ensureUser(request.userId);
+  const profile = await ensureUser(request.userId);
+  if (profile.role !== 'coach') return reply.code(403).send({ error: 'Solo un entrenador puede crear plantillas' });
   const templateId = `template-${randomUUID()}`;
   const totalExercises = days.reduce((sum, day) => sum + day.exercises.length, 0);
   const totalSets = days.reduce((sum, day) => sum + day.exercises.reduce((s, exercise) => s + exercise.sets, 0), 0);
@@ -700,7 +705,97 @@ app.post('/v1/templates', { preHandler: authenticate }, async (request, reply) =
   }
 });
 
+app.patch('/v1/templates/:id', { preHandler: authenticate }, async (request, reply) => {
+  const profile = await ensureUser(request.userId);
+  if (profile.role !== 'coach') return reply.code(403).send({ error: 'Solo un entrenador puede editar plantillas' });
+
+  const templateId = textValue(request.params?.id);
+  if (!templateId) return reply.code(400).send({ error: 'Falta la plantilla a editar' });
+
+  let days;
+  try {
+    days = normalizeImportedDays(request.body?.days);
+  } catch (error) {
+    return reply.code(400).send({ error: error.message });
+  }
+
+  const name = textValue(request.body?.name, 'Rutina creada').slice(0, 120);
+  const totalExercises = days.reduce((sum, day) => sum + day.exercises.length, 0);
+  const totalSets = days.reduce((sum, day) => sum + day.exercises.reduce((s, exercise) => s + exercise.sets, 0), 0);
+  const meta = `${totalExercises} ejercicios · ${totalSets} series`;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+    const templateResult = await client.query('SELECT id FROM template WHERE id = $1 FOR UPDATE', [templateId]);
+    if (!templateResult.rows[0]) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa plantilla' });
+    }
+
+    // El descanso no forma parte del payload del entrenador. Conservamos el
+    // valor técnico existente por posición y usamos 90 s para ejercicios nuevos.
+    const restResult = await client.query(
+      'SELECT day, position, rest_seconds FROM template_exercise WHERE template_id = $1',
+      [templateId],
+    );
+    const restByPosition = new Map(
+      restResult.rows.map((row) => [`${Number(row.day)}:${Number(row.position)}`, Number(row.rest_seconds) || 90]),
+    );
+
+    await client.query('DELETE FROM template_exercise WHERE template_id = $1', [templateId]);
+    await client.query('DELETE FROM template_day WHERE template_id = $1', [templateId]);
+    for (const day of days) {
+      await client.query(
+        `INSERT INTO template_day (template_id, day, name) VALUES ($1, $2, $3)`,
+        [templateId, day.day, day.name],
+      );
+      for (const [index, exercise] of day.exercises.entries()) {
+        await client.query(
+          `INSERT INTO template_exercise (template_id, day, position, name, sets, reps, load_kg, rest_seconds, note)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            templateId,
+            day.day,
+            index,
+            exercise.name,
+            exercise.sets,
+            exercise.reps,
+            exercise.load,
+            restByPosition.get(`${day.day}:${index}`) ?? 90,
+            exercise.note || null,
+          ],
+        );
+      }
+    }
+    await client.query('UPDATE template SET name = $1, meta = $2 WHERE id = $3', [name, meta, templateId]);
+    await client.query('COMMIT');
+    return reply.send({ ok: true, id: templateId });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error }, 'Template update failed');
+    return reply.code(500).send({ error: 'No pudimos actualizar la plantilla' });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/v1/templates/:id', { preHandler: authenticate }, async (request, reply) => {
+  const profile = await ensureUser(request.userId);
+  if (profile.role !== 'coach') return reply.code(403).send({ error: 'Solo un entrenador puede eliminar plantillas' });
+
+  const templateId = textValue(request.params?.id);
+  if (!templateId) return reply.code(400).send({ error: 'Falta la plantilla a eliminar' });
+
+  const result = await pool.query('DELETE FROM template WHERE id = $1 RETURNING id', [templateId]);
+  if (!result.rows[0]) return reply.code(404).send({ error: 'No encontramos esa plantilla' });
+  return reply.send({ ok: true, id: templateId });
+});
+
 app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (request, reply) => {
+  const profile = await ensureUser(request.userId);
+  if (profile.role !== 'coach') return reply.code(403).send({ error: 'Solo un entrenador puede asignar plantillas' });
+
   const templateId = textValue(request.params?.id);
   const clientIds = Array.isArray(request.body?.clientIds)
     ? request.body.clientIds.filter((id) => typeof id === 'string')
@@ -808,6 +903,11 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
       }
       results.push({ clientId, planId, routineIds });
     }
+
+    await client.query(
+      'UPDATE template SET assigned = $2 WHERE id = $1',
+      [templateId, `${clientIds.length} ${clientIds.length === 1 ? 'alumno' : 'alumnos'}`],
+    );
 
     await client.query('COMMIT');
     return reply.code(201).send({ ok: true, results });

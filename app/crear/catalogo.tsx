@@ -34,6 +34,7 @@ export default function ExerciseCatalog() {
       name,
       sets: 3,
       reps: '8-10',
+      loadKg: null,
       restSeconds: 90,
       note: '',
     });
@@ -47,6 +48,7 @@ export default function ExerciseCatalog() {
       name,
       sets: 3,
       reps: '8-10',
+      loadKg: null,
       restSeconds: 90,
       note: '',
     });

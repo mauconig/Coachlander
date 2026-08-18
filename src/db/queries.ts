@@ -425,6 +425,25 @@ export function getSettings(data: RemoteData, role: 'athlete' | 'coach'): Settin
 
 export type TemplateRow = { id: string; name: string; meta: string; assigned: string | null };
 
+export type TemplateExercise = {
+  id: string;
+  day: number;
+  position: number;
+  name: string;
+  sets: number;
+  reps: string;
+  loadKg: number | null;
+  note: string;
+};
+
+export type TemplateDay = {
+  day: number;
+  name: string;
+  exercises: TemplateExercise[];
+};
+
+export type TemplateDetail = TemplateRow & { days: TemplateDay[] };
+
 export function getTemplates(data: RemoteData): TemplateRow[] {
   return [...rows(data, 'template')]
     .sort((a, b) => numberValue(a, 'position') - numberValue(b, 'position'))
@@ -434,6 +453,40 @@ export function getTemplates(data: RemoteData): TemplateRow[] {
       meta: stringValue(row, 'meta'),
       assigned: row.assigned === null || row.assigned === undefined ? null : stringValue(row, 'assigned'),
     }));
+}
+
+export function getTemplateById(data: RemoteData, templateId: string): TemplateDetail | null {
+  const template = getTemplates(data).find((item) => item.id === templateId);
+  if (!template) return null;
+
+  const templateDays = rows(data, 'template_day')
+    .filter((row) => stringValue(row, 'template_id') === templateId)
+    .sort((a, b) => numberValue(a, 'day') - numberValue(b, 'day'));
+  const templateExercises = rows(data, 'template_exercise');
+
+  return {
+    ...template,
+    days: templateDays.map((dayRow) => {
+      const day = numberValue(dayRow, 'day');
+      return {
+        day,
+        name: stringValue(dayRow, 'name', `Día ${day}`),
+        exercises: templateExercises
+          .filter((row) => stringValue(row, 'template_id') === templateId && numberValue(row, 'day') === day)
+          .sort((a, b) => numberValue(a, 'position') - numberValue(b, 'position'))
+          .map((row) => ({
+            id: `${templateId}-${day}-${numberValue(row, 'position')}`,
+            day,
+            position: numberValue(row, 'position'),
+            name: stringValue(row, 'name'),
+            sets: numberValue(row, 'sets', 3),
+            reps: stringValue(row, 'reps', '8-10'),
+            loadKg: nullableNumber(row, 'load_kg'),
+            note: stringValue(row, 'note'),
+          })),
+      };
+    }),
+  };
 }
 
 export type ThreadRow = {

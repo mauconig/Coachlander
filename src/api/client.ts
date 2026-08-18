@@ -185,7 +185,8 @@ export type TemplateExerciseInput = {
   sets: number;
   reps: string;
   loadKg: number | null;
-  restSeconds: number;
+  /** Kept for the importer/legacy create flow; coach-facing template editing omits it. */
+  restSeconds?: number;
   note?: string;
 };
 
@@ -202,6 +203,38 @@ export function createTemplate(
   return request<{ ok: true; id: string }>(tokenProvider, '/v1/templates', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+export type UpdateTemplateExerciseInput = {
+  position: number;
+  name: string;
+  sets: number;
+  reps: string;
+  loadKg: number | null;
+  note?: string;
+};
+
+export type UpdateTemplateDayInput = {
+  day: number;
+  name: string;
+  exercises: UpdateTemplateExerciseInput[];
+};
+
+export function updateTemplate(
+  tokenProvider: TokenProvider,
+  templateId: string,
+  input: { name: string; days: UpdateTemplateDayInput[] },
+) {
+  return request<{ ok: true; id: string }>(tokenProvider, `/v1/templates/${templateId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+export function deleteTemplate(tokenProvider: TokenProvider, templateId: string) {
+  return request<{ ok: true; id: string }>(tokenProvider, `/v1/templates/${templateId}`, {
+    method: 'DELETE',
   });
 }
 

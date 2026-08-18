@@ -1,55 +1,68 @@
 import { router } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 
+import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
+import { Icon } from '@/components/Icon';
 import { SectionHeader } from '@/components/Note';
-import { Row } from '@/components/Row';
+import { Row, RowIndex } from '@/components/Row';
 import { Screen } from '@/components/Screen';
 import { Txt } from '@/components/Txt';
-import { getClients, getRoutineSetCount, getTemplates, getTodayRoutine } from '@/db/queries';
+import { getTemplates } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { color } from '@/theme/tokens';
 
-/**
- * Rutinas tab. La biblioteca del entrenador: plantillas guardadas y la rutina
- * activa. El botón "+" de la barra inferior abre el creador o el import con IA.
- */
+/** Biblioteca de plantillas del entrenador. Las rutinas asignadas viven en Alumnos. */
 export default function Routines() {
   const templates = useQuery(getTemplates);
-  const routine = useQuery(getTodayRoutine);
-  const totalSets = useQuery(getRoutineSetCount);
-  const firstClient = useQuery(getClients)[0];
 
   return (
     <Screen scroll gap={16}>
       <View style={styles.header}>
-        <Txt variant="eyebrow">BIBLIOTECA</Txt>
-        <Txt variant="h2">Rutinas creadas</Txt>
+        <View style={styles.heading}>
+          <Txt variant="eyebrow">BIBLIOTECA</Txt>
+          <Txt variant="h2">Rutinas</Txt>
+        </View>
+        <Button
+          label="Nueva rutina"
+          size="sm"
+          icon={<Icon name="plus" size={15} tone={color.ink} weight={2.5} />}
+          onPress={() => router.push('/crear/nuevo')}
+        />
       </View>
 
       <View style={styles.list}>
         <SectionHeader title="TUS PLANTILLAS" trailing={`${templates.length}`} />
-        {templates.map((template) => (
-          <Row
-            key={template.id}
-            title={template.name}
-            meta={template.meta}
-            trailing={template.assigned ?? 'SIN ASIGNAR'}
-            trailingTone={template.assigned ? color.lime : color.textFaint}
-            onPress={() => firstClient && router.push(`/rutina/${firstClient.id}`)}
-          />
-        ))}
+        {templates.length ? (
+          templates.map((template, index) => (
+            <Row
+              key={template.id}
+              left={<RowIndex n={index + 1} tone={color.lime} />}
+              title={template.name}
+              meta={template.meta}
+              trailing={template.assigned ?? 'SIN ASIGNAR'}
+              trailingTone={template.assigned ? color.lime : color.textFaint}
+              chevron
+              onPress={() => router.push({ pathname: '/plantilla/[id]', params: { id: template.id } })}
+            />
+          ))
+        ) : (
+          <Card tone="muted" padding={18} gap={8}>
+            <Txt variant="bodyStrong" center>
+              Todavía no tenés plantillas
+            </Txt>
+            <Txt variant="body" tone={color.textMuted} center>
+              Creá tu primera rutina para verla acá y asignarla cuando quieras.
+            </Txt>
+          </Card>
+        )}
       </View>
-
-      <Card tone="muted" padding={16} gap={4}>
-        <Txt variant="label">RUTINA ACTIVA</Txt>
-        <Txt variant="bodyStrong">{`${routine.name} · ${totalSets} series`}</Txt>
-      </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { gap: 3 },
+  header: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 },
+  heading: { flex: 1, gap: 4 },
   list: { gap: 9 },
 });

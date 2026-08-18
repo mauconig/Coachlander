@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { assignTemplate, createTemplate, saveImportedRoutine } from '@/api/client';
+import { assignTemplate, createTemplate, saveImportedRoutine, updateTemplate } from '@/api/client';
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
@@ -35,10 +35,22 @@ export default function AssignCreatedRoutine() {
   const { getToken } = useAuth();
   const { unit, role, draft } = useApp();
   const refreshRemoteData = useRefreshRemoteData();
-  const { routineName, setRoutineName, days, assignees, toggleAssignee, autoOverload, setAutoOverload, reset, preselectWeekStart } =
+  const {
+    routineName,
+    setRoutineName,
+    days,
+    assignees,
+    toggleAssignee,
+    autoOverload,
+    setAutoOverload,
+    reset,
+    preselectWeekStart,
+    editingTemplateId,
+  } =
     useCreator();
 
   const isCoach = role === 'coach';
+  const isEditingTemplate = isCoach && Boolean(editingTemplateId);
   const isSoloAthlete = role === 'athlete' && draft.soloTraining;
   const clients = useQuery(getClients);
   const count = assignees.length;
@@ -71,7 +83,7 @@ export default function AssignCreatedRoutine() {
           reps: e.reps,
           restSeconds: e.restSeconds,
           day: d.day,
-          load: null,
+          load: e.loadKg,
           rest: e.restSeconds,
           note: e.note.trim(),
         })),
@@ -83,12 +95,12 @@ export default function AssignCreatedRoutine() {
       .map((d) => ({
         day: d.day,
         name: d.name.trim() || `Día ${d.day}`,
-        exercises: d.exercises.map((e) => ({
+        exercises: d.exercises.map((e, position) => ({
+          position,
           name: e.name.trim(),
           sets: e.sets,
           reps: e.reps,
-          loadKg: null,
-          restSeconds: e.restSeconds,
+          loadKg: e.loadKg,
           note: e.note.trim(),
         })),
       }));
@@ -124,13 +136,25 @@ export default function AssignCreatedRoutine() {
       setError('Agregá al menos un ejercicio antes de guardar.');
       return;
     }
-    if (!asTemplate && !count) {
+    if (!isEditingTemplate && !asTemplate && !count) {
       setError('Elegí al menos un alumno o guardá como plantilla.');
       return;
     }
     setSaving(true);
     setError('');
     try {
+      if (editingTemplateId) {
+        await updateTemplate(getToken, editingTemplateId, {
+          name: routineName.trim() || 'Rutina creada',
+          days: list,
+        });
+        await refreshRemoteData();
+        reset();
+        router.dismissAll();
+        router.replace('/rutinas');
+        return;
+      }
+
       const template = await createTemplate(getToken, {
         name: routineName.trim() || 'Rutina creada',
         days: list,
@@ -182,8 +206,12 @@ export default function AssignCreatedRoutine() {
         />
       ) : (
         <Heading
-          title="Guardá tu rutina"
-          subtitle="Queda como plantilla en tu biblioteca y elegí la semana para tus alumnos."
+          title={isEditingTemplate ? 'Editá tu rutina' : 'Guardá tu rutina'}
+          subtitle={
+            isEditingTemplate
+              ? 'Los cambios afectan sólo a la plantilla y no modifican asignaciones existentes.'
+              : 'Queda como plantilla en tu biblioteca y elegí la semana para tus alumnos.'
+          }
           variant="h2"
         />
       )}
@@ -195,7 +223,7 @@ export default function AssignCreatedRoutine() {
         placeholder={isSoloAthlete ? 'Ej: Mi rutina de fuerza' : 'Ej: Fuerza base — 4 días'}
       />
 
-      {isCoach && count ? (
+      {isCoach && !isEditingTemplate && count ? (
         <View style={styles.group}>
           <Txt variant="label">¿PARA QUÉ SEMANA?</Txt>
           <View style={styles.chips}>
@@ -214,7 +242,7 @@ export default function AssignCreatedRoutine() {
         </View>
       ) : null}
 
-      {isCoach ? (
+      {isCoach && !isEditingTemplate ? (
         <View style={styles.group}>
           <Txt variant="label">ASIGNAR A</Txt>
           {clients.map((client) => {
@@ -233,29 +261,35 @@ export default function AssignCreatedRoutine() {
         </View>
       ) : null}
 
-      <Row
-        title="Overload automático"
-        meta={`+2,5 ${unit} por semana`}
-        right={<Toggle value={autoOverload} onChange={setAutoOverload} label="Overload automático" />}
-      />
+      {isEditingTemplate ? null : (
+        <Row
+          title="Overload automático"
+          meta={`+2,5 ${unit} por semana`}
+          right={<Toggle value={autoOverload} onChange={setAutoOverload} label="Overload automático" />}
+        />
+      )}
 
       {error ? <Txt variant="body" tone={color.textSoft}>{error}</Txt> : null}
 
       <View style={styles.actions}>
         {isCoach ? (
-          <>
-            <Button
-              label={count ? `Marcar como completada · ${count} ${count === 1 ? 'alumno' : 'alumnos'}` : 'Guardar como plantilla'}
-              onPress={() => publishCoach(true)}
-            />
-            {count ? (
-              <Pressable onPress={() => publishCoach(false)} accessibilityRole="button">
-                <Txt variant="body" tone={color.textFaint} center>
-                  Solo guardar como plantilla
-                </Txt>
-              </Pressable>
-            ) : null}
-          </>
+          isEditingTemplate ? (
+            <Button label="Guardar cambios" onPress={() => publishCoach(true)} />
+          ) : (
+            <>
+              <Button
+                label={count ? `Marcar como completada · ${count} ${count === 1 ? 'alumno' : 'alumnos'}` : 'Guardar como plantilla'}
+                onPress={() => publishCoach(true)}
+              />
+              {count ? (
+                <Pressable onPress={() => publishCoach(false)} accessibilityRole="button">
+                  <Txt variant="body" tone={color.textFaint} center>
+                    Solo guardar como plantilla
+                  </Txt>
+                </Pressable>
+              ) : null}
+            </>
+          )
         ) : (
           <Button label="Guardar en mi plan" onPress={() => publish()} />
         )}

@@ -34,7 +34,7 @@ export default function CreateRoutine() {
 
       <Heading
         title="Armá una rutina desde cero"
-        subtitle="Definí los días y después agregá ejercicios con series, repeticiones y descanso."
+        subtitle="Definí los días y después agregá ejercicios con series, repeticiones, carga e indicaciones."
         variant="h2"
       />
 
