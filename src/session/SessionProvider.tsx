@@ -11,7 +11,7 @@ import {
   type SessionAction,
   type SessionState,
 } from './sessionMachine';
-import { playSessionTone } from './sessionFeedback';
+import { playSessionBeeps, playSessionTone } from './sessionFeedback';
 import {
   clearSessionNotification,
   configureSessionNotifications,
@@ -90,7 +90,12 @@ async function clearRuntime(db: SQLiteDatabase) {
 
 function announceTransition(previous: SessionState, next: SessionState) {
   if (!next.soundEnabled) return;
-  if (previous.phase === 'countdown' && next.phase === 'countdown' && next.left !== previous.left && next.left <= 3) {
+  if (
+    (previous.phase === 'countdown' || previous.phase === 'work' || previous.phase === 'rest') &&
+    next.phase === previous.phase &&
+    next.left !== previous.left &&
+    next.left <= 3
+  ) {
     playSessionTone('countdown');
   }
   if (previous.phase === 'countdown' && next.phase === 'work') playSessionTone('start');
@@ -114,6 +119,10 @@ function notificationClock(state: SessionState) {
   return state.phase === 'overtime' ? `+${mmss(state.overtime)}` : mmss(state.left);
 }
 
+function isClosedDatabaseError(error: unknown) {
+  return String(error).toLowerCase().includes('access to closed resource');
+}
+
 export function SessionProvider({ children }: { children: ReactNode }) {
   const db = useSQLiteContext();
   const [runtime, setRuntime] = useState<SessionRuntime | null>(null);
@@ -122,7 +131,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const callbackRef = useRef<SessionCallback | undefined>(undefined);
   const runtimeRef = useRef<SessionRuntime | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const dbReadyRef = useRef(false);
+  const dbQueueRef = useRef<Promise<void>>(Promise.resolve());
   runtimeRef.current = runtime;
+
+  const enqueueDb = useCallback((operation: (database: SQLiteDatabase) => Promise<void>) => {
+    if (!mountedRef.current || !dbReadyRef.current) return Promise.resolve();
+    const next = dbQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (!mountedRef.current || !dbReadyRef.current) return;
+        await operation(db);
+      });
+    dbQueueRef.current = next.catch(() => undefined);
+    return next;
+  }, [db]);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    dbReadyRef.current = false;
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+  }, []);
 
   useEffect(() => {
     void configureSessionNotifications().finally(() => setNotificationsReady(true));
@@ -130,6 +160,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    dbReadyRef.current = true;
     void db
       .getFirstAsync<{ payload_json: string }>('SELECT payload_json FROM active_session LIMIT 1')
       .then((row) => {
@@ -139,17 +170,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (saved.sessionId && saved.routineId && saved.exercises?.length) setRuntime(saved);
         } catch (error) {
           console.warn('[Coachlander] No se pudo restaurar la sesión local', error);
-          void clearRuntime(db);
+          void enqueueDb(clearRuntime).catch(() => undefined);
         }
       })
-      .catch((error: unknown) => console.warn('[Coachlander] SQLite no pudo leer la sesión', error))
+      .catch((error: unknown) => {
+        if (!cancelled && !isClosedDatabaseError(error)) {
+          console.warn('[Coachlander] SQLite no pudo leer la sesión', error);
+        }
+      })
       .finally(() => {
         if (!cancelled) setHydrated(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [db]);
+  }, [db, enqueueDb]);
 
   useEffect(() => {
     if (!runtime || !hydrated) return;
@@ -157,14 +192,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Do not write on every 250 ms tick. The timestamp makes the next render
     // accurate, while a one-second debounce keeps the local snapshot durable.
     persistTimerRef.current = setTimeout(() => {
-      void saveRuntime(db, runtime).catch((error: unknown) =>
+      void enqueueDb((database) => saveRuntime(database, runtime)).catch((error: unknown) =>
         console.warn('[Coachlander] SQLite no pudo guardar la sesión', error),
       );
     }, 1000);
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
-  }, [db, hydrated, runtime]);
+  }, [enqueueDb, hydrated, runtime]);
 
   useEffect(() => {
     if (!runtime || runtime.state.paused || runtime.state.finished) return;
@@ -213,11 +248,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const finish = useCallback(() => {
-    playSessionTone('finish');
+  const clearLocal = useCallback(() => {
     setRuntime(null);
-    void clearRuntime(db).catch((error: unknown) => console.warn('[Coachlander] SQLite no pudo limpiar la sesión', error));
-  }, [db]);
+    void enqueueDb(clearRuntime).catch((error: unknown) => console.warn('[Coachlander] SQLite no pudo limpiar la sesión', error));
+  }, [enqueueDb]);
+  const finish = useCallback(() => {
+    playSessionBeeps('finish', 2, 220);
+    clearLocal();
+  }, [clearLocal]);
   const markRemoteStarted = useCallback(() => {
     setRuntime((current) => current ? { ...current, remoteStarted: true } : current);
   }, []);
@@ -273,8 +311,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     dispatch,
     markRemoteStarted,
     finish,
-    discard: finish,
-  }), [dispatch, ensureSession, finish, hydrated, markRemoteStarted, runtime]);
+    discard: clearLocal,
+  }), [clearLocal, dispatch, ensureSession, finish, hydrated, markRemoteStarted, runtime]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

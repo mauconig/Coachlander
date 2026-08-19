@@ -16,6 +16,8 @@ export type ButtonVariant =
   | 'dark'
   /** white fill (Google sign-in) */
   | 'light'
+  /** destructive confirmation */
+  | 'danger'
   /** bare text link */
   | 'ghost';
 
@@ -93,6 +95,7 @@ const SKIN: Record<ButtonVariant, { container: ViewStyle; tone: string }> = {
   },
   dark: { container: { backgroundColor: color.ink }, tone: color.text },
   light: { container: { backgroundColor: color.text }, tone: color.ink },
+  danger: { container: { backgroundColor: '#FF5D67' }, tone: color.ink },
   ghost: { container: { backgroundColor: 'transparent' }, tone: color.textFaint },
 };
 

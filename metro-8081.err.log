@@ -1,0 +1,21 @@
+C:\code\Coachlander\node_modules\expo\node_modules\@expo\cli\build\src\utils\errors.js:130
+    throw error;
+    ^
+
+Error: ENOENT: no such file or directory, watch 'C:\code\Coachlander\node_modules\expo-auth-session\node_modules\.expo-application-cvNG53k4\android\src\main\java\expo\modules\application'
+    at FSWatcher.<computed> (node:internal/fs/watchers:323:19)
+    at Object.watch (node:fs:3062:36)
+    at #watchdir (C:\code\Coachlander\node_modules\@expo\metro-file-map\build\watchers\FallbackWatcher.js:164:38)
+    at C:\code\Coachlander\node_modules\@expo\metro-file-map\build\watchers\FallbackWatcher.js:268:39
+    at Walker.<anonymous> (C:\code\Coachlander\node_modules\@expo\metro-file-map\build\watchers\FallbackWatcher.js:410:33)
+    at Walker.emit (node:events:509:20)
+    at C:\code\Coachlander\node_modules\walker\lib\walker.js:69:16
+    at FSReqCallback.oncomplete (node:fs:184:23) {
+  errno: -4058,
+  syscall: 'watch',
+  code: 'ENOENT',
+  path: 'C:\\code\\Coachlander\\node_modules\\expo-auth-session\\node_modules\\.expo-application-cvNG53k4\\android\\src\\main\\java\\expo\\modules\\application',
+  filename: 'C:\\code\\Coachlander\\node_modules\\expo-auth-session\\node_modules\\.expo-application-cvNG53k4\\android\\src\\main\\java\\expo\\modules\\application'
+}
+
+Node.js v26.5.1

@@ -101,6 +101,8 @@ export type Routine = {
   secondsPerSet: number;
   weekStart?: string;
   completedAt?: string;
+  sessionStatus: 'scheduled' | 'active' | 'partial' | 'completed';
+  sessionEndedAt?: string;
   loadMode: 'ai' | 'coach';
   exercises: Exercise[];
 };
@@ -130,6 +132,7 @@ export type SessionRecord = {
   sets: number;
   volume: number;
   completion: number;
+  status: 'completed' | 'partial';
 };
 
 /** One row of the progressive-overload table. */

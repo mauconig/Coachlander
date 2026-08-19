@@ -58,7 +58,7 @@ export function CoachHistoryDetailSheet({ visible, session, tokenProvider, onClo
   const title = detail?.name ?? session?.name ?? 'Entrenamiento';
 
   return (
-    <Sheet visible={visible && !!session} onClose={onClose} bare eyebrow="ENTRENAMIENTO COMPLETADO" title={title}>
+    <Sheet visible={visible && !!session} onClose={onClose} bare eyebrow={session?.status === 'partial' ? 'ENTRENAMIENTO PARCIAL' : 'ENTRENAMIENTO COMPLETADO'} title={title}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {session ? (
           <View style={styles.summary}>

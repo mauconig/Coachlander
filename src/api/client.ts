@@ -219,6 +219,7 @@ export type CoachHistorySession = {
   sets: number;
   volumeKg: number;
   completion: number;
+  status: 'completed' | 'partial';
 };
 
 export type CoachHistorySet = {
@@ -248,6 +249,7 @@ export type CoachHistoryDetail = {
   name: string;
   minutes: number;
   loadMode: 'ai' | 'coach';
+  status: 'completed' | 'partial';
   exercises: CoachHistoryExercise[];
 };
 
@@ -732,14 +734,28 @@ export function completeRoutine(tokenProvider: TokenProvider, routineId: string)
 }
 
 export function startSession(tokenProvider: TokenProvider, routineId: string) {
-  return request<{ ok: true; routineId: string }>(tokenProvider, '/v1/session/start', {
+  return request<{ ok: true; routineId: string; status: 'active' }>(tokenProvider, '/v1/session/start', {
     method: 'POST',
     body: JSON.stringify({ routineId }),
   });
 }
 
 export function endSession(tokenProvider: TokenProvider, routineId: string) {
-  return request<{ ok: true; routineId: string }>(tokenProvider, '/v1/session/end', {
+  return request<{ ok: true; routineId: string; status: 'completed' }>(tokenProvider, '/v1/session/end', {
+    method: 'POST',
+    body: JSON.stringify({ routineId }),
+  });
+}
+
+export function stopSession(tokenProvider: TokenProvider, routineId: string) {
+  return request<{ ok: true; routineId: string; status: 'partial'; endedAt: string }>(tokenProvider, '/v1/session/stop', {
+    method: 'POST',
+    body: JSON.stringify({ routineId }),
+  });
+}
+
+export function cancelSession(tokenProvider: TokenProvider, routineId: string) {
+  return request<{ ok: true; routineId: string; status: 'scheduled' }>(tokenProvider, '/v1/session/cancel', {
     method: 'POST',
     body: JSON.stringify({ routineId }),
   });

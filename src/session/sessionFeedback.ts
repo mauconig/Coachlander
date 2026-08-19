@@ -34,18 +34,18 @@ function prepareAudio() {
 }
 
 const settings: Record<SessionTone, { volume: number; rate: number; haptic: 'light' | 'medium' | 'success' }> = {
-  countdown: { volume: 0.38, rate: 1.5, haptic: 'light' },
-  start: { volume: 0.8, rate: 0.8, haptic: 'medium' },
-  set: { volume: 0.55, rate: 1.2, haptic: 'light' },
-  restStart: { volume: 0.3, rate: 0.7, haptic: 'light' },
-  restEnd: { volume: 0.65, rate: 1.3, haptic: 'medium' },
-  overtime: { volume: 0.8, rate: 0.6, haptic: 'medium' },
-  overtimePulse: { volume: 0.18, rate: 1.8, haptic: 'light' },
-  exercise: { volume: 0.6, rate: 1, haptic: 'medium' },
-  finish: { volume: 0.9, rate: 0.9, haptic: 'success' },
+  countdown: { volume: 1, rate: 1.5, haptic: 'light' },
+  start: { volume: 1, rate: 0.8, haptic: 'medium' },
+  set: { volume: 0.8, rate: 1.2, haptic: 'light' },
+  restStart: { volume: 0.7, rate: 0.7, haptic: 'light' },
+  restEnd: { volume: 1, rate: 1.3, haptic: 'medium' },
+  overtime: { volume: 1, rate: 0.6, haptic: 'medium' },
+  overtimePulse: { volume: 0.65, rate: 1.8, haptic: 'light' },
+  exercise: { volume: 0.9, rate: 1, haptic: 'medium' },
+  finish: { volume: 1, rate: 0.9, haptic: 'success' },
 };
 
-export function playSessionTone(event: SessionTone) {
+function playTone(event: SessionTone) {
   if (Platform.OS === 'web') return;
   const config = settings[event];
   void prepareAudio();
@@ -63,4 +63,16 @@ export function playSessionTone(event: SessionTone) {
     ? Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     : Haptics.impactAsync(config.haptic === 'medium' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
   void haptic.catch(() => undefined);
+}
+
+export function playSessionTone(event: SessionTone) {
+  playTone(event);
+}
+
+/** Repeated local beeps for countdowns and important session boundaries. */
+export function playSessionBeeps(event: SessionTone, count: number, gapMs = 180) {
+  if (Platform.OS === 'web') return;
+  for (let index = 0; index < count; index += 1) {
+    setTimeout(() => playTone(event), index * gapMs);
+  }
 }

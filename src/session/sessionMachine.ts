@@ -26,6 +26,8 @@ export type SessionState = {
   paused: boolean;
   minimized: boolean;
   soundEnabled: boolean;
+  /** Total de series guardadas durante toda esta ejecución, incluso al cambiar de ejercicio. */
+  completedSets: number;
   phasePausedAt?: number;
 };
 
@@ -38,6 +40,7 @@ export type SessionAction =
   | { type: 'closeSheet'; now: number }
   | { type: 'press'; key: string }
   | { type: 'toggleQueue' }
+  | { type: 'setQueue'; open: boolean }
   | { type: 'minimize' }
   | { type: 'restore' }
   | { type: 'togglePaused'; now: number }
@@ -95,6 +98,7 @@ export function createInitialSessionState(exercises: Exercise[], now = Date.now(
     paused: false,
     minimized: false,
     soundEnabled: true,
+    completedSets: 0,
   };
 }
 
@@ -150,10 +154,18 @@ export function reduceSessionState(state: SessionState, action: SessionAction): 
     }
 
     case 'log': {
+      const wasDone = state.sets[action.index]?.done ?? false;
       const sets = state.sets.map((item, index) =>
         index === action.index ? { done: true, load: action.load, reps: action.reps } : item,
       );
-      const base = resumeClock({ ...state, sets, sheet: null, keypad: false, typed: '' }, action.now);
+      const base = resumeClock({
+        ...state,
+        sets,
+        completedSets: (state.completedSets ?? 0) + (wasDone ? 0 : 1),
+        sheet: null,
+        keypad: false,
+        typed: '',
+      }, action.now);
       if (sets.every((item) => item.done)) return base;
       return {
         ...base,
@@ -179,6 +191,9 @@ export function reduceSessionState(state: SessionState, action: SessionAction): 
 
     case 'toggleQueue':
       return { ...state, queueOpen: !state.queueOpen };
+
+    case 'setQueue':
+      return { ...state, queueOpen: action.open };
 
     case 'minimize':
       return { ...state, minimized: true };

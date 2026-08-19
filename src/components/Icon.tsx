@@ -13,6 +13,9 @@ export type IconName =
   | 'more'
   | 'backspace'
   | 'play'
+  | 'pause'
+  | 'skip-next'
+  | 'stop'
   | 'grip'
   | 'info'
   | 'file'
@@ -70,6 +73,14 @@ export function Icon({ name, size = 20, tone = color.textMuted, weight = 2 }: Pr
         </>
       )}
       {name === 'play' && <Path d="M7 4.5l13 7.5-13 7.5Z" fill={tone} />}
+      {name === 'pause' && <Path d="M8 5v14M16 5v14" {...stroke} />}
+      {name === 'skip-next' && (
+        <>
+          <Path d="M5.5 5.5 15 12l-9.5 6.5Z" fill={tone} />
+          <Path d="M18 5v14" {...stroke} />
+        </>
+      )}
+      {name === 'stop' && <Rect x={5} y={5} width={14} height={14} rx={2.5} fill={tone} />}
       {name === 'grip' && (
         <>
           <Circle cx={9} cy={6} r={1.5} fill={tone} />

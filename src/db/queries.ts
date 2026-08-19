@@ -112,12 +112,12 @@ export function getAthlete(data: RemoteData): AthleteRecord {
   const completedRoutines = rows(data, 'routine').filter(
     (routine) =>
       (!athleteId || stringValue(routine, 'athlete_id') === athleteId) &&
-      Boolean(stringValue(routine, 'completed_at')),
+      (Boolean(stringValue(routine, 'completed_at')) || stringValue(routine, 'session_status') === 'partial'),
   );
   const totalSessions = completedRoutines.length;
   const completedWeeks = new Set(
     completedRoutines.map((routine) =>
-      weekStartFromDate(dateOnly(stringValue(routine, 'completed_at'))),
+      weekStartFromDate(dateOnly(stringValue(routine, 'completed_at') || stringValue(routine, 'session_ended_at'))),
     ),
   );
   const streakWeeks = consecutiveWeekCount(completedWeeks);
@@ -576,6 +576,8 @@ export function getTodayRoutine(data: RemoteData): Routine {
     secondsPerSet: numberValue(routineRow, 'seconds_per_set'),
     weekStart: stringValue(routineRow, 'week_start').slice(0, 10) || undefined,
     completedAt: stringValue(routineRow, 'completed_at') || undefined,
+    sessionStatus: (stringValue(routineRow, 'session_status') || (stringValue(routineRow, 'completed_at') ? 'completed' : 'scheduled')) as Routine['sessionStatus'],
+    sessionEndedAt: stringValue(routineRow, 'session_ended_at') || undefined,
     loadMode: stringValue(routineRow, 'load_mode') === 'ai' ? 'ai' : 'coach',
     exercises,
   };
@@ -614,6 +616,8 @@ export function getRoutineById(data: RemoteData, routineId: string): Routine | n
     secondsPerSet: numberValue(routineRow, 'seconds_per_set'),
     weekStart: stringValue(routineRow, 'week_start').slice(0, 10) || undefined,
     completedAt: stringValue(routineRow, 'completed_at') || undefined,
+    sessionStatus: (stringValue(routineRow, 'session_status') || (stringValue(routineRow, 'completed_at') ? 'completed' : 'scheduled')) as Routine['sessionStatus'],
+    sessionEndedAt: stringValue(routineRow, 'session_ended_at') || undefined,
     loadMode: stringValue(routineRow, 'load_mode') === 'ai' ? 'ai' : 'coach',
     exercises,
   };
@@ -787,36 +791,36 @@ export function getClientLastSession(data: RemoteData, athleteId: string): strin
 export function getHistory(data: RemoteData): SessionRecord[] {
   if (data.user?.role === 'athlete') {
     const athleteId = data.user.id;
-    const exerciseById = new Map(rows(data, 'exercise').map((row) => [stringValue(row, 'id'), row]));
     return rows(data, 'routine')
       .filter(
         (routine) =>
           stringValue(routine, 'athlete_id') === athleteId &&
-          Boolean(stringValue(routine, 'completed_at')),
+          (Boolean(stringValue(routine, 'completed_at')) || stringValue(routine, 'session_status') === 'partial'),
       )
-      .sort((a, b) => stringValue(b, 'completed_at').localeCompare(stringValue(a, 'completed_at')))
+      .sort((a, b) => {
+        const dateA = stringValue(a, 'completed_at') || stringValue(a, 'session_ended_at');
+        const dateB = stringValue(b, 'completed_at') || stringValue(b, 'session_ended_at');
+        return dateB.localeCompare(dateA);
+      })
       .map((routine) => {
         const routineId = stringValue(routine, 'id');
-        const links = rows(data, 'routine_exercise').filter((link) => stringValue(link, 'routine_id') === routineId);
         const logs = rows(data, 'set_log').filter((log) => stringValue(log, 'routine_id') === routineId);
-        const plannedSets = links.reduce(
-          (total, link) => total + numberValue(exerciseById.get(stringValue(link, 'exercise_id')), 'sets'),
-          0,
-        );
         const volume = logs.reduce(
           (total, log) => total + (nullableNumber(log, 'load') ?? 0) * numberValue(log, 'reps'),
           0,
         );
-        const date = dateOnly(stringValue(routine, 'completed_at'));
+        const status = stringValue(routine, 'session_status') === 'partial' ? 'partial' : 'completed';
+        const date = dateOnly(stringValue(routine, 'completed_at') || stringValue(routine, 'session_ended_at'));
         return {
           id: routineId,
           date: new Date(`${date}T12:00:00`),
           name: stringValue(routine, 'name'),
-          minutes: numberValue(routine, 'estimated_minutes'),
-          sets: plannedSets,
+          minutes: status === 'completed' ? numberValue(routine, 'estimated_minutes') : 0,
+          sets: logs.length,
           volume,
           // A completed routine is a completed session; it is not a target score.
-          completion: 100,
+          completion: status === 'completed' ? 100 : 0,
+          status,
         };
       });
   }
@@ -831,15 +835,17 @@ export function getHistory(data: RemoteData): SessionRecord[] {
       sets: numberValue(row, 'sets'),
       volume: numberValue(row, 'volume'),
       completion: numberValue(row, 'completion'),
+      status: 'completed',
     }));
 }
 
 export function getHistorySummary(data: RemoteData) {
   const history = getHistory(data);
+  const completed = history.filter((session) => session.status === 'completed').length;
   return {
     sessions: history.length || getMetaNumber(data, 'history_sessions'),
     totalMinutes: history.reduce((total, session) => total + session.minutes, 0) || getMetaNumber(data, 'history_minutes'),
-    completion: history.length ? 100 : getMetaNumber(data, 'history_completion'),
+    completion: history.length ? Math.round((completed / history.length) * 100) : getMetaNumber(data, 'history_completion'),
   };
 }
 

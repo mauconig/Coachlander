@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { type ReactNode, useEffect, useMemo, useRef } from 'react';
+import { Animated, Modal, PanResponder, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from './Icon';
@@ -15,25 +15,80 @@ type Props = {
   children: ReactNode;
   /** hide the close button (drag-to-dismiss sheets) */
   bare?: boolean;
+  /** Allow dragging the sheet down to dismiss it. */
+  swipeToDismiss?: boolean;
 };
 
 /**
  * Bottom sheet over a scrim. Used by the session player for the weight picker
  * and the up-next queue.
  */
-export function Sheet({ visible, onClose, eyebrow, title, children, bare }: Props) {
+export function Sheet({ visible, onClose, eyebrow, title, children, bare, swipeToDismiss = false }: Props) {
   const insets = useSafeAreaInsets();
+  const dragY = useRef(new Animated.Value(0)).current;
+  const panResponder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) =>
+      swipeToDismiss && gesture.dy > 6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+    onPanResponderMove: (_, gesture) => dragY.setValue(Math.max(0, gesture.dy)),
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dy > 72 || gesture.vy > 0.8) {
+        Animated.timing(dragY, {
+          toValue: 420,
+          duration: 160,
+          useNativeDriver: true,
+        }).start(() => {
+          dragY.setValue(0);
+          onClose();
+        });
+        return;
+      }
+      Animated.spring(dragY, {
+        toValue: 0,
+        speed: 24,
+        bounciness: 5,
+        useNativeDriver: true,
+      }).start();
+    },
+    onPanResponderTerminate: () => {
+      Animated.spring(dragY, {
+        toValue: 0,
+        speed: 24,
+        bounciness: 5,
+        useNativeDriver: true,
+      }).start();
+    },
+  }), [dragY, onClose, swipeToDismiss]);
+
+  useEffect(() => {
+    if (!visible) dragY.setValue(0);
+  }, [dragY, visible]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.root}>
         <Pressable style={styles.scrim} onPress={onClose} accessibilityLabel="Cerrar" />
 
-        <View style={[styles.sheet, { paddingBottom: insets.bottom + 26 }]}>
+        <Animated.View
+          style={[
+            styles.sheet,
+            { paddingBottom: insets.bottom + 26 },
+            swipeToDismiss && { transform: [{ translateY: dragY }] },
+          ]}
+        >
           {bare ? (
-            <Pressable onPress={onClose} style={styles.grabberTap} accessibilityLabel="Cerrar">
-              <View style={styles.grabber} />
-            </Pressable>
+            <View
+              {...(swipeToDismiss ? panResponder.panHandlers : {})}
+              style={styles.grabberGestureArea}
+            >
+              <Pressable
+                onPress={onClose}
+                style={styles.grabberTap}
+                accessibilityLabel="Cerrar"
+                accessibilityHint={swipeToDismiss ? 'Tocá o deslizá hacia abajo' : undefined}
+              >
+                <View style={styles.grabber} />
+              </Pressable>
+            </View>
           ) : null}
 
           {title ? (
@@ -55,7 +110,7 @@ export function Sheet({ visible, onClose, eyebrow, title, children, bare }: Prop
           ) : null}
 
           {children}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -74,7 +129,8 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     gap: 16,
   },
-  grabberTap: { alignItems: 'center', paddingBottom: 4 },
+  grabberGestureArea: { paddingVertical: 4 },
+  grabberTap: { alignItems: 'center', paddingVertical: 8 },
   grabber: { width: 46, height: 4, borderRadius: radius.pill, backgroundColor: color.border },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   headerText: { flex: 1, gap: 3 },

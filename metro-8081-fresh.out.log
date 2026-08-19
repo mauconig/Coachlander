@@ -1,0 +1,193 @@
+env: load .env.local
+env: export CLERK_SECRET_KEY DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL ENABLE_EPHEMERAL_TEST_ACCOUNT EPHEMERAL_TEST_EMAIL EPHEMERAL_TEST_PASSWORD EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY EXPO_PUBLIC_EPHEMERAL_TEST_EMAIL
+Starting project at C:\code\Coachlander
+Logs: C:\code\Coachlander\.expo\dev\logs\start.log
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Starting Metro Bundler
+
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 19884ms node_modules\expo-router\entry.js (2319 modules)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [ApiError: Invalid session]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+Android Bundled 70ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+Android Bundled 77ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  [Coachlander] No se pudo cerrar la sesiÃ³n [ApiError: Not Found]
+ WARN  [Coachlander] No se pudo cerrar la sesiÃ³n [ApiError: Not Found]
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 77ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  [Coachlander] No se pudo actualizar el historial [ApiError: Invalid session]
+ WARN  [Coachlander] No se pudo actualizar el perfil [ApiError: Invalid session]
+ WARN  [Coachlander] No se pudo actualizar el historial [ApiError: Invalid session]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Error code : bad parameter or other API misuse]
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] SQLite no pudo leer la sesión [Error: Call to function 'NativeDatabase.prepareAsync' has been rejected.
+→ Caused by: Access to closed resource]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 9164ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 149ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [Error: fetch failed: Fetch request has been canceled]
+ WARN  [Coachlander] No se pudo cargar el backend [ApiError: Invalid session]
+Android Bundled 150ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+Android Bundled 146ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ ERROR  The action 'GO_BACK' was not handled by any navigator.
+
+Is there any screen to go back to?
+
+This is a development-only warning and won't be shown in production. 
+
+Code: metroServerLogs.native.ts
+[0m [90m 103 |[39m }
+ [90m 104 |[39m
+[31m[1m>[22m[39m[90m 105 |[39m [36mclass[39m [33mNamelessError[39m [36mextends[39m [33mError[39m {
+ [90m     |[39m [31m[1m^[22m[39m
+ [90m 106 |[39m   name [33m=[39m [32m''[39m[33m;[39m
+ [90m 107 |[39m }
+ [90m 108 |[39m [36mfunction[39m captureCurrentStack() {[0m
+Call Stack
+  apply (<native>)
+  NamelessError (node_modules\@expo\metro-runtime\src\metroServerLogs.native.ts:105)
+  captureCurrentStack (node_modules\@expo\metro-runtime\src\metroServerLogs.native.ts:110:27)
+  HMRClient.log (node_modules\@expo\metro-runtime\src\metroServerLogs.native.ts:42:79)
+  console.level (node_modules\react-native\Libraries\Core\setUpDeveloperTools.js:41:24)
+  onUnhandledAction (node_modules\expo-router\build\ExpoRoot.js:183:22)
+  <anonymous> (node_modules\expo-router\build\react-navigation\core\useNavigationBuilder.js:611:32)
+  apply (<native>)
+  latestCallback (node_modules\expo-router\build\utils\useLatestCallback.js:52:33)
+  dispatch (node_modules\expo-router\build\react-navigation\core\useNavigationHelpers.js:57:34)
+  listeners.focus._$argument_0 (node_modules\expo-router\build\react-navigation\core\BaseNavigationContainer.js:120:67)
+  listener (node_modules\expo-router\build\react-navigation\core\useFocusedListenersChildrenAdapter.js:54:53)
+  listener (node_modules\expo-router\build\react-navigation\core\useFocusedListenersChildrenAdapter.js:49:53)
+  <anonymous> (node_modules\expo-router\build\react-navigation\core\BaseNavigationContainer.js:120:31)
+  apply (<native>)
+  latestCallback (node_modules\expo-router\build\utils\useLatestCallback.js:52:33)
+  exports.routingQueue.run (node_modules\expo-router\build\global-state\routingQueue.js:40:41)
+  <anonymous> (node_modules\expo-router\build\imperative-api.js:12:35)
+  callCreate.react_stack_bottom_frame (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:17215:26)
+  run (<native>)
+  runWithFiberInDEV (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:697:33)
+  commitHookEffectListMount (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:10563:46)
+  commitHookPassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:10650:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12049:42)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12293:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12293:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12293:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12293:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12293:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12041:49)
+  recursivelyTraversePassiveMountEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12004:36)
+  commitPassiveMountOnFiber (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:12084:49)
+  flushPassiveEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:14844:34)
+  flushPendingEffects (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:14751:33)
+  flushSpawnedWork (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:14716:30)
+  commitRoot (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:14447:25)
+  commitRootWhenReady (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:13352:17)
+  performWorkOnRoot (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:13299:34)
+  performSyncWorkOnRoot (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:3688:24)
+  flushSyncWorkAcrossRoots_impl (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:3538:42)
+  processRootScheduleInMicrotask (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:3570:38)
+  scheduleMicrotask$argument_0 (node_modules\react-native\Libraries\Renderer\implementations\ReactFabric-dev.js:3708:47) 
+
+Code: ExpoRoot.js
+[0m [90m 133 |[39m         }
+ [90m 134 |[39m     }
+[31m[1m>[22m[39m[90m 135 |[39m     [36mreturn[39m (([35m0[39m[33m,[39m jsx_runtime_1[33m.[39mjsx)(storeContext_1[33m.[39m[33mStoreContext[39m[33m.[39m[33mProvider[39m[33m,[39m { value[33m:[39m store[33m,[39m children[33m:[39m ([35m0[39m[33m,[39m jsx_runtime_1[33m.[39mjsx)([33mNavigationContainer_1[39m[33m.[39m[33mNavigationContainer[39m[33m,[39m { ref[33m:[39m store[33m.[39mnavigationRef[33m,[39m initialState[33m:[39m store[33m.[39mstate[33m,[39m linking[33m:[39m store[33m.[39mlinking[33m,[39m onUnhandledAction[33m:[39m onUnhandledAction[33m,[39m onStateChange[33m:[39m store[33m.[39monStateChange[33m,[39m documentTitle[33m:[39m documentTitle[33m,[39m onReady[33m:[39m onNavigationReady[33m,[39m children[33m:[39m ([35m0[39m[33m,[39m jsx_runtime_1[33m.[39mjsx)(serverLocationContext_1[33m.[39m[33mServerContext[39m[33m.[39m[33mProvider[39m[33m,[39m { value[33m:[39m serverContext[33m,[39m children[33m:[39m ([35m0[39m[33m,[39m jsx_runtime_1[33m.[39mjsx)([33mWrapperComponent[39m[33m,[39m { children[33m:[39m ([35m0[39m[33m,[39m jsx_runtime_1[33m.[39mjsx)([33mContent[39m[33m,[39m {}) }) }) }) }))[33m;[39m
+ [90m     |[39m                                                                                                                         [31m[1m^[22m[39m
+ [90m 136 |[39m }
+ [90m 137 |[39m [36mfunction[39m [33mContent[39m() {
+ [90m 138 |[39m     [36mconst[39m children [33m=[39m [([35m0[39m[33m,[39m jsx_runtime_1[33m.[39mjsx)(primitives_1[33m.[39m[33mScreen[39m[33m,[39m { name[33m:[39m constants_1[33m.[39m[33mINTERNAL_SLOT_NAME[39m[33m,[39m component[33m:[39m router_store_1[33m.[39mstore[33m.[39mrootComponent })][33m;[39m[0m
+Call Stack
+  ContextNavigator (node_modules\expo-router\build\ExpoRoot.js:135:121)
+  ExpoRoot (node_modules\expo-router\build\ExpoRoot.js:85:33)
+  App (node_modules\expo-router\build\qualified-entry.js:20:91)
+  WithDevTools (node_modules\expo\src\launch\withDevTools.tsx:21:12)
+ WARN  [Coachlander] No se pudo cargar el backend [ApiError: Invalid session]
+ WARN  [Coachlander] No se pudo cargar el backend [ApiError: Invalid session]

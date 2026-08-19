@@ -817,6 +817,8 @@ const coachScopedRoutines = `
     r.day,
     r.week_start,
     r.completed_at,
+    r.session_status,
+    r.session_ended_at,
     r.estimated_minutes,
     c.id AS client_id,
     c.name AS client_name,
@@ -826,7 +828,7 @@ const coachScopedRoutines = `
         WHEN r.week_start IS NOT NULL
         THEN (r.week_start + ((r.day - 1) * INTERVAL '1 day'))::date
       END,
-      (r.completed_at AT TIME ZONE 'America/Asuncion')::date
+      (COALESCE(r.completed_at, r.session_ended_at) AT TIME ZONE 'America/Asuncion')::date
     ) AS scheduled_date
   FROM routine r
   JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
@@ -844,6 +846,7 @@ function mapCoachHistoryRow(row) {
     sets: Number(row.sets) || 0,
     volumeKg: Number(row.volume_kg) || 0,
     completion: Number(row.completion) || 0,
+    status: row.session_status === 'partial' ? 'partial' : 'completed',
   };
 }
 
@@ -851,42 +854,43 @@ async function fetchCoachHistory({ clientId, from, to, limit, offset }) {
   const result = await pool.query(
     `WITH scoped_routines AS (${coachScopedRoutines}),
       routine_sets AS (
-        SELECT re.routine_id, SUM(e.sets)::integer AS sets
-        FROM routine_exercise re
-        JOIN exercise e ON e.id = re.exercise_id
-        GROUP BY re.routine_id
+        SELECT sl.routine_id, COUNT(*)::integer AS sets
+        FROM set_log sl
+        JOIN scoped_routines sr ON sr.id = sl.routine_id
+        GROUP BY sl.routine_id
       ),
       routine_volume AS (
         SELECT sl.routine_id, SUM(COALESCE(sl.load, 0) * sl.reps)::double precision AS volume_kg
         FROM set_log sl
         JOIN scoped_routines sr ON sr.id = sl.routine_id
-        WHERE sr.completed_at IS NOT NULL
+        WHERE sr.session_status IN ('completed', 'partial')
         GROUP BY sl.routine_id
       ),
-      completed_total AS (
+      history_total AS (
         SELECT COUNT(*)::integer AS total
         FROM scoped_routines
-        WHERE completed_at IS NOT NULL
-          AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+        WHERE session_status IN ('completed', 'partial')
+          AND (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
       )
       SELECT
         sr.id,
         sr.client_id,
         sr.client_name,
-        COALESCE((sr.completed_at AT TIME ZONE 'America/Asuncion')::date, sr.scheduled_date) AS training_date,
+        (COALESCE(sr.completed_at, sr.session_ended_at) AT TIME ZONE 'America/Asuncion')::date AS training_date,
         sr.name,
-        sr.estimated_minutes AS minutes,
+        CASE WHEN sr.session_status = 'completed' THEN sr.estimated_minutes ELSE 0 END AS minutes,
         COALESCE(rs.sets, 0) AS sets,
         COALESCE(rv.volume_kg, 0) AS volume_kg,
-        CASE WHEN sr.completed_at IS NOT NULL THEN 100 ELSE 0 END AS completion,
-        ct.total AS total_count
+        CASE WHEN sr.session_status = 'completed' THEN 100 ELSE 0 END AS completion,
+        sr.session_status,
+        ht.total AS total_count
       FROM scoped_routines sr
-      CROSS JOIN completed_total ct
+      CROSS JOIN history_total ht
       LEFT JOIN routine_sets rs ON rs.routine_id = sr.id
       LEFT JOIN routine_volume rv ON rv.routine_id = sr.id
-      WHERE sr.completed_at IS NOT NULL
-        AND (sr.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
-      ORDER BY COALESCE((sr.completed_at AT TIME ZONE 'America/Asuncion')::date, sr.scheduled_date) DESC, sr.id DESC
+      WHERE sr.session_status IN ('completed', 'partial')
+        AND (COALESCE(sr.completed_at, sr.session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+      ORDER BY (COALESCE(sr.completed_at, sr.session_ended_at) AT TIME ZONE 'America/Asuncion')::date DESC, sr.id DESC
       LIMIT $4 OFFSET $5`,
     [clientId, from, to, limit, offset],
   );
@@ -905,6 +909,8 @@ async function fetchCoachHistoryDetail(routineId) {
        r.id,
        r.name,
        r.completed_at,
+       r.session_status,
+       r.session_ended_at,
        r.estimated_minutes AS minutes,
        r.load_mode,
        c.id AS client_id,
@@ -912,7 +918,7 @@ async function fetchCoachHistoryDetail(routineId) {
      FROM routine r
      JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
      WHERE r.id = $1
-       AND r.completed_at IS NOT NULL`,
+       AND r.session_status IN ('completed', 'partial')`,
     [routineId],
   );
   const routine = routineResult.rows[0];
@@ -976,10 +982,11 @@ async function fetchCoachHistoryDetail(routineId) {
     id: routine.id,
     clientId: routine.client_id,
     clientName: routine.client_name,
-    date: databaseDateValue(routine.completed_at),
+    date: databaseDateValue(routine.completed_at ?? routine.session_ended_at),
     name: routine.name,
-    minutes: Number(routine.minutes) || 0,
+    minutes: routine.session_status === 'completed' ? Number(routine.minutes) || 0 : 0,
     loadMode: routine.load_mode === 'ai' ? 'ai' : 'coach',
+    status: routine.session_status === 'partial' ? 'partial' : 'completed',
     exercises,
   };
 }
@@ -1038,13 +1045,13 @@ function repsFromScheme(scheme) {
 async function fetchCoachActivity({ clientId, from, to }) {
   const result = await pool.query(
     `SELECT
-       date_trunc('week', completed_at AT TIME ZONE 'America/Asuncion')::date AS week_start,
+       date_trunc('week', COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date AS week_start,
        COUNT(*)::integer AS sessions,
-       COALESCE(SUM(estimated_minutes), 0)::integer AS minutes
+       COALESCE(SUM(CASE WHEN session_status = 'completed' THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
      FROM (${coachScopedRoutines}) scoped_routines
-     WHERE completed_at IS NOT NULL
-       AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
-     GROUP BY date_trunc('week', completed_at AT TIME ZONE 'America/Asuncion')::date
+     WHERE session_status IN ('completed', 'partial')
+       AND (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+     GROUP BY date_trunc('week', COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date
      ORDER BY week_start`,
     [clientId, from, to],
   );
@@ -1078,13 +1085,13 @@ async function fetchCoachHeatmap({ clientId, from, to }) {
       ),
       completed AS (
         SELECT
-          (completed_at AT TIME ZONE 'America/Asuncion')::date AS date,
+          (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date AS date,
           COUNT(*)::integer AS sessions,
-          COALESCE(SUM(estimated_minutes), 0)::integer AS minutes
+          COALESCE(SUM(CASE WHEN session_status = 'completed' THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
         FROM (${coachScopedRoutines}) scoped_routines
-        WHERE completed_at IS NOT NULL
-          AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
-        GROUP BY (completed_at AT TIME ZONE 'America/Asuncion')::date
+        WHERE session_status IN ('completed', 'partial')
+          AND (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+        GROUP BY (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date
       )
       SELECT
         days.date,
@@ -1117,13 +1124,13 @@ function rangeWeekdayOccurrences(from, to) {
 async function fetchCoachWeekdayActivity({ clientId, from, to }) {
   const result = await pool.query(
     `SELECT
-       EXTRACT(ISODOW FROM (completed_at AT TIME ZONE 'America/Asuncion'))::integer AS weekday,
+       EXTRACT(ISODOW FROM (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion'))::integer AS weekday,
        COUNT(*)::integer AS sessions,
-       COUNT(DISTINCT date_trunc('week', completed_at AT TIME ZONE 'America/Asuncion')::date)::integer AS active_weeks
+       COUNT(DISTINCT date_trunc('week', COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date)::integer AS active_weeks
      FROM (${coachScopedRoutines}) scoped_routines
-     WHERE completed_at IS NOT NULL
-       AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
-     GROUP BY EXTRACT(ISODOW FROM (completed_at AT TIME ZONE 'America/Asuncion'))
+     WHERE session_status IN ('completed', 'partial')
+       AND (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+     GROUP BY EXTRACT(ISODOW FROM (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion'))
      ORDER BY weekday`,
     [clientId, from, to],
   );
@@ -1469,6 +1476,7 @@ async function fetchCoachStatistics({ clientId, from, to }) {
        SELECT
          COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date)::integer AS scheduled,
          COUNT(*) FILTER (WHERE completed_at IS NOT NULL AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date)::integer AS completed,
+         COUNT(*) FILTER (WHERE session_status IN ('completed', 'partial') AND (COALESCE(completed_at, session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date)::integer AS sessions,
          COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date AND completed_at IS NOT NULL AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date)::integer AS completed_scheduled,
          COALESCE(SUM(CASE WHEN completed_at IS NOT NULL AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
        FROM scoped_routines`,
@@ -1480,21 +1488,21 @@ async function fetchCoachStatistics({ clientId, from, to }) {
        JOIN routine r ON r.id = sl.routine_id
        JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
        WHERE ($1::text IS NULL OR c.id = $1)
-         AND r.completed_at IS NOT NULL
-         AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date`,
+         AND r.session_status IN ('completed', 'partial')
+         AND (COALESCE(r.completed_at, r.session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date`,
       [clientId, from, to],
     ),
     pool.query(
       `SELECT
-         date_trunc('week', r.completed_at AT TIME ZONE 'America/Asuncion')::date AS week_start,
+         date_trunc('week', COALESCE(r.completed_at, r.session_ended_at) AT TIME ZONE 'America/Asuncion')::date AS week_start,
          SUM(COALESCE(sl.load, 0) * sl.reps)::double precision AS volume_kg
        FROM set_log sl
        JOIN routine r ON r.id = sl.routine_id
        JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
        WHERE ($1::text IS NULL OR c.id = $1)
-         AND r.completed_at IS NOT NULL
-         AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
-       GROUP BY date_trunc('week', r.completed_at AT TIME ZONE 'America/Asuncion')::date
+         AND r.session_status IN ('completed', 'partial')
+         AND (COALESCE(r.completed_at, r.session_ended_at) AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+       GROUP BY date_trunc('week', COALESCE(r.completed_at, r.session_ended_at) AT TIME ZONE 'America/Asuncion')::date
        ORDER BY week_start`,
       [clientId, from, to],
     ),
@@ -1508,6 +1516,7 @@ async function fetchCoachStatistics({ clientId, from, to }) {
   const summaryRow = summaryResult.rows[0] ?? {};
   const scheduledRoutines = Number(summaryRow.scheduled) || 0;
   const completedRoutines = Number(summaryRow.completed) || 0;
+  const sessionCount = Number(summaryRow.sessions) || 0;
   const completedScheduledRoutines = Number(summaryRow.completed_scheduled) || 0;
   const weeklyVolume = weeklyResult.rows.map((row) => {
     const weekStart = databaseDateValue(row.week_start);
@@ -1527,7 +1536,7 @@ async function fetchCoachStatistics({ clientId, from, to }) {
       scheduledRoutines,
       completedRoutines,
       completionRate: scheduledRoutines ? Math.round((completedScheduledRoutines / scheduledRoutines) * 100) : 0,
-      sessions: completedRoutines,
+      sessions: sessionCount,
       totalMinutes: Number(summaryRow.minutes) || 0,
       volumeKg: Number(volumeResult.rows[0]?.volume_kg) || 0,
     },
@@ -3013,7 +3022,12 @@ app.patch('/v1/exercises/:id', { preHandler: authenticate }, async (request, rep
 
 async function completeRoutine(client, routineId, athleteId) {
   const result = await client.query(
-    'UPDATE routine SET completed_at = COALESCE(completed_at, NOW()) WHERE id = $1 AND athlete_id = $2 RETURNING id, completed_at',
+    `UPDATE routine
+        SET completed_at = COALESCE(completed_at, NOW()),
+            session_status = 'completed',
+            session_ended_at = NULL
+      WHERE id = $1 AND athlete_id = $2
+      RETURNING id, completed_at, session_status`,
     [routineId, athleteId],
   );
   if (!result.rows[0]) return null;
@@ -3049,21 +3063,47 @@ app.post('/v1/session/start', { preHandler: authenticate }, async (request, repl
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a iniciar' });
 
   const routineResult = await pool.query(
-    'SELECT id, name FROM routine WHERE id = $1 AND athlete_id = $2',
+    `SELECT id, name, completed_at, session_status
+       FROM routine
+      WHERE id = $1 AND athlete_id = $2`,
     [routineId, request.userId],
   );
   if (!routineResult.rows[0]) return reply.code(404).send({ error: 'No encontramos esa rutina' });
+  if (routineResult.rows[0].completed_at) {
+    return reply.code(409).send({ error: 'Esta rutina ya fue completada' });
+  }
 
-  await pool.query(
-    `UPDATE client SET
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE routine
+          SET session_status = 'active', session_ended_at = NULL
+        WHERE id = $1 AND athlete_id = $2`,
+      [routineId, request.userId],
+    );
+    await client.query(
+      `UPDATE client SET
        live_routine = $1,
        live_set_index = 0,
        live_total_sets = NULL,
-       live_elapsed = '0:00'
-     WHERE clerk_user_id = $2`,
-    [routineResult.rows[0].name, request.userId],
-  );
-  return reply.send({ ok: true, routineId });
+       live_elapsed = '0:00',
+       live_session_started_at = CASE
+         WHEN live_routine = $1 THEN COALESCE(live_session_started_at, NOW())
+         ELSE NOW()
+       END
+       WHERE clerk_user_id = $2`,
+      [routineResult.rows[0].name, request.userId],
+    );
+    await client.query('COMMIT');
+    return reply.send({ ok: true, routineId, status: 'active' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error, routineId }, 'Session start failed');
+    return reply.code(500).send({ error: 'No pudimos iniciar la sesiÃ³n' });
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/v1/session/end', { preHandler: authenticate }, async (request, reply) => {
@@ -3084,16 +3124,126 @@ app.post('/v1/session/end', { preHandler: authenticate }, async (request, reply)
          live_set_index = NULL,
          live_total_sets = NULL,
          live_elapsed = NULL,
+         live_session_started_at = NULL,
          status = 'Última sesión: hoy'
        WHERE clerk_user_id = $1`,
       [request.userId],
     );
     await client.query('COMMIT');
-    return reply.send({ ok: true, routineId });
+    return reply.send({ ok: true, routineId, status: 'completed' });
   } catch (error) {
     await client.query('ROLLBACK');
     request.log.error({ error }, 'Session end failed');
     return reply.code(500).send({ error: 'No pudimos finalizar la sesión' });
+  } finally {
+    client.release();
+  }
+});
+
+async function clearLiveSession(client, athleteId) {
+  await client.query(
+    `UPDATE client SET
+       live_routine = NULL,
+       live_set_index = NULL,
+       live_total_sets = NULL,
+       live_elapsed = NULL,
+       live_session_started_at = NULL
+     WHERE clerk_user_id = $1`,
+    [athleteId],
+  );
+}
+
+async function findOwnedRoutine(client, routineId, athleteId) {
+  const result = await client.query(
+    `SELECT id, completed_at, session_status, session_ended_at
+       FROM routine
+      WHERE id = $1 AND athlete_id = $2`,
+    [routineId, athleteId],
+  );
+  return result.rows[0] ?? null;
+}
+
+app.post('/v1/session/stop', { preHandler: authenticate }, async (request, reply) => {
+  const routineId = textValue(request.body?.routineId);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a detener' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const routine = await findOwnedRoutine(client, routineId, request.userId);
+    if (!routine) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa rutina' });
+    }
+    if (routine.completed_at) {
+      await client.query('ROLLBACK');
+      return reply.code(409).send({ error: 'Esta rutina ya fue completada' });
+    }
+    const ended = await client.query(
+      `UPDATE routine
+          SET session_status = 'partial', session_ended_at = COALESCE(session_ended_at, NOW())
+        WHERE id = $1 AND athlete_id = $2
+        RETURNING session_ended_at`,
+      [routineId, request.userId],
+    );
+    await clearLiveSession(client, request.userId);
+    await client.query('COMMIT');
+    return reply.send({
+      ok: true,
+      routineId,
+      status: 'partial',
+      endedAt: ended.rows[0]?.session_ended_at ?? new Date().toISOString(),
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error, routineId }, 'Session stop failed');
+    return reply.code(500).send({ error: 'No pudimos detener la sesion' });
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/v1/session/cancel', { preHandler: authenticate }, async (request, reply) => {
+  const routineId = textValue(request.body?.routineId);
+  if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a cancelar' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const routine = await findOwnedRoutine(client, routineId, request.userId);
+    if (!routine) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa rutina' });
+    }
+    if (routine.completed_at) {
+      await client.query('ROLLBACK');
+      return reply.code(409).send({ error: 'Esta rutina ya fue completada' });
+    }
+    await client.query(
+      `DELETE FROM set_log
+        WHERE clerk_user_id = $1
+          AND routine_id = $2
+          AND logged_at >= (
+            SELECT live_session_started_at
+              FROM client
+             WHERE clerk_user_id = $1
+               AND live_session_started_at IS NOT NULL
+          )`,
+      [request.userId, routineId],
+    );
+    await client.query(
+      `UPDATE routine
+          SET session_status = 'scheduled', session_ended_at = NULL
+        WHERE id = $1 AND athlete_id = $2`,
+      [routineId, request.userId],
+    );
+    await clearLiveSession(client, request.userId);
+    await client.query('COMMIT');
+    return reply.send({ ok: true, routineId, status: 'scheduled' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error, routineId }, 'Session cancel failed');
+    return reply.code(500).send({ error: 'No pudimos cancelar la sesion' });
   } finally {
     client.release();
   }

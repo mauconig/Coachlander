@@ -20,6 +20,7 @@ export function CoachHistoryRow({
   const badge = dayBadge(new Date(`${session.date}T12:00:00`));
   const details = [
     showClient ? session.clientName : null,
+    session.status === 'partial' ? 'PARCIAL' : null,
     `${session.minutes} min`,
   ].filter(Boolean).join(' · ');
 

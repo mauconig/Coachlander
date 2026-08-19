@@ -2,15 +2,14 @@ import { useAuth } from '@clerk/expo';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Image } from 'expo-image';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PanResponder, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
-import { endSession, pushSetLog, startSession } from '@/api/client';
+import { cancelSession, endSession, pushSetLog, startSession, stopSession } from '@/api/client';
 import { Card } from '@/components/Card';
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { ProgressBar } from '@/components/Progress';
 import { Row, RowIndex } from '@/components/Row';
 import { Screen } from '@/components/Screen';
@@ -31,6 +30,54 @@ const KEY_ROWS = [
   [',', '0', 'del'],
 ];
 
+type ClosingAction = 'finish' | 'stop' | 'cancel' | null;
+type Confirmation = Exclude<ClosingAction, 'finish' | null> | null;
+
+type SetLogPayload = {
+  routineId: string;
+  exerciseId: string;
+  setIndex: number;
+  load: number | null;
+  reps: number;
+};
+
+function PlayerAction({
+  icon,
+  label,
+  onPress,
+  disabled,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      style={({ pressed }) => [
+        styles.playerAction,
+        pressed && styles.playerActionPressed,
+        disabled && styles.playerActionDisabled,
+      ]}
+    >
+      <Icon name={icon} size={22} tone={disabled ? color.textFaint : color.text} />
+      <Txt variant="labelTight" tone={disabled ? color.textFaint : color.text} numberOfLines={1}>
+        {label}
+      </Txt>
+    </Pressable>
+  );
+}
+
+function repsLabelFromScheme(scheme: string, fallback: number) {
+  const [, reps] = scheme.split(/[x×]/i);
+  return reps?.trim().replace(/\s*reps?$/i, '') || String(fallback);
+}
+
 /**
  * 02 · Sesión en vivo — the player. Tap the CTA to close a set, pick the load
  * you actually used, and the rest timer starts on its own.
@@ -40,55 +87,267 @@ export default function LiveSession() {
   const { unit } = useApp();
   const { getToken } = useAuth();
   const refreshRemoteData = useRefreshRemoteData();
-  const insets = useSafeAreaInsets();
   const routine = useQuery(getTodayRoutine);
   const [mediaFailed, setMediaFailed] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation>(null);
+  const [closingAction, setClosingAction] = useState<ClosingAction>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const startRequestRef = useRef<{ routineId: string; promise: Promise<void> } | null>(null);
+  const pendingSetLogsRef = useRef(new Map<string, SetLogPayload>());
+  const inFlightSetLogsRef = useRef(new Set<Promise<unknown>>());
 
   const session = useSession(routine.exercises, {
+    enabled: !closingAction,
     unit,
     estimatedMinutes: routine.estimatedMinutes,
     routineId: routine.id,
     routineTitle: `${routine.block} · ${routine.name}`,
     onSetLogged: (entry) => {
       const payload = { routineId: routine.id, ...entry };
-      void pushSetLog(getToken, payload)
-        .then(() => refreshRemoteData())
+      const key = `${entry.exerciseId}:${entry.setIndex}`;
+      pendingSetLogsRef.current.set(key, payload);
+      const request = pushSetLog(getToken, payload);
+      inFlightSetLogsRef.current.add(request);
+      void request
+        .then(() => {
+          if (pendingSetLogsRef.current.get(key) === payload) pendingSetLogsRef.current.delete(key);
+          return refreshRemoteData().catch((refreshError: unknown) => {
+            console.warn('[Coachlander] No se pudo refrescar después de guardar la serie', refreshError);
+          });
+        })
         .catch((error: unknown) => {
           console.warn('[Coachlander] No se pudo sincronizar la serie', error);
-        });
+        })
+        .finally(() => inFlightSetLogsRef.current.delete(request));
     },
   });
+  const exerciseRepsLabel = repsLabelFromScheme(session.exercise.scheme, session.reps);
+
+  const openQueueRef = useRef(session.openQueue);
+  openQueueRef.current = session.openQueue;
+  const queuePanResponderRef = useRef<ReturnType<typeof PanResponder.create> | null>(null);
+  if (!queuePanResponderRef.current) {
+    queuePanResponderRef.current = PanResponder.create({
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        gesture.dy < -6 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+      onPanResponderRelease: (_, gesture) => {
+        if (gesture.dy < -36 || gesture.vy < -0.45) openQueueRef.current();
+      },
+    });
+  }
 
   // Marca "entrenando ahora" en el cliente vinculado al abrir la sesión.
   useEffect(() => {
     // No enviar el inicio remoto mientras el atleta sigue en el countdown.
-    if (session.remoteStarted || !routine.id || session.phase === 'countdown') return;
-    void startSession(getToken, routine.id)
-      .then(() => session.markRemoteStarted())
+    if (
+      session.remoteStarted ||
+      !routine.id ||
+      session.phase === 'countdown' ||
+      startRequestRef.current?.routineId === routine.id
+    ) return;
+    const promise = startSession(getToken, routine.id)
+      .then(() => {
+        session.markRemoteStarted();
+      })
       .catch((error: unknown) => {
+        if (startRequestRef.current?.routineId === routine.id) startRequestRef.current = null;
         console.warn('[Coachlander] No se pudo marcar el inicio de sesión', error);
+        throw error;
       });
+    startRequestRef.current = { routineId: routine.id, promise };
+    void promise.catch(() => undefined);
   }, [getToken, routine.id, session.markRemoteStarted, session.phase, session.remoteStarted]);
 
   useEffect(() => {
     setMediaFailed(false);
   }, [session.exercise.id]);
 
-  const onCta = () => {
-    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    if (session.press() === 'finish') {
-      void endSession(getToken, routine.id)
-        .then(() => refreshRemoteData())
-        .then(() => session.finish())
-        .then(() => router.back())
-        .catch((error: unknown) => {
-          console.warn('[Coachlander] No se pudo marcar la sesión como completada', error);
-        });
+  const waitForSetRequests = async () => {
+    const activeRequests = [...inFlightSetLogsRef.current];
+    if (activeRequests.length) await Promise.allSettled(activeRequests);
+  };
+
+  const flushPendingSetLogs = async () => {
+    await waitForSetRequests();
+    const pending = [...pendingSetLogsRef.current.entries()];
+    if (!pending.length) return;
+    await Promise.all(pending.map(async ([key, payload]) => {
+      await pushSetLog(getToken, payload);
+      if (pendingSetLogsRef.current.get(key) === payload) pendingSetLogsRef.current.delete(key);
+    }));
+  };
+
+  const ensureRemoteStarted = async () => {
+    if (!routine.id || session.phase === 'countdown') return false;
+    if (session.remoteStarted) return true;
+    if (startRequestRef.current?.routineId === routine.id) {
+      await startRequestRef.current.promise;
+      return true;
+    }
+    const promise = startSession(getToken, routine.id).then(() => {
+      session.markRemoteStarted();
+    });
+    startRequestRef.current = { routineId: routine.id, promise };
+    try {
+      await promise;
+    } catch (error) {
+      if (startRequestRef.current?.promise === promise) startRequestRef.current = null;
+      throw error;
+    }
+    return true;
+  };
+
+  const refreshAfterClose = async () => {
+    try {
+      await refreshRemoteData();
+    } catch (refreshError) {
+      console.warn('[Coachlander] No se pudo refrescar la rutina tras cerrar', refreshError);
     }
   };
 
+  const finishRoutine = async () => {
+    if (closingAction) return;
+    setClosingAction('finish');
+    setActionError(null);
+    try {
+      await ensureRemoteStarted();
+      await flushPendingSetLogs();
+      await endSession(getToken, routine.id);
+      await refreshAfterClose();
+      session.finish();
+      router.back();
+    } catch (error) {
+      console.warn('[Coachlander] No se pudo marcar la sesión como completada', error);
+      setActionError('No pudimos terminar la rutina. Conservamos todo para que vuelvas a intentar.');
+      setClosingAction(null);
+    }
+  };
+
+  const onCta = () => {
+    if (closingAction) return;
+    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (session.press() === 'finish') {
+      void finishRoutine();
+    }
+  };
+
+  const leaveSession = async (action: Exclude<ClosingAction, 'finish' | null>) => {
+    if (closingAction) return;
+    setClosingAction(action);
+    setActionError(null);
+    try {
+      const started = await ensureRemoteStarted();
+      if (action === 'stop') {
+        await flushPendingSetLogs();
+        if (started) await stopSession(getToken, routine.id);
+      } else {
+        // Wait for in-flight inserts before deleting them, otherwise a late request
+        // could recreate a set after the cancellation transaction.
+        await waitForSetRequests();
+        if (started) await cancelSession(getToken, routine.id);
+      }
+      await refreshAfterClose();
+      pendingSetLogsRef.current.clear();
+      session.discard();
+      router.back();
+    } catch (error) {
+      console.warn('[Coachlander] No se pudo cerrar la sesión', error);
+      setActionError(
+        action === 'stop'
+          ? 'No pudimos guardar la sesión parcial. Conservamos todo para que vuelvas a intentar.'
+          : 'No pudimos cancelar la rutina. La sesión sigue guardada en este teléfono.',
+      );
+      setClosingAction(null);
+    }
+  };
+
+  const openStopConfirmation = () => {
+    setOptionsOpen(false);
+    setActionError(null);
+    setConfirmation('stop');
+  };
+
+  const openCancelConfirmation = () => {
+    setOptionsOpen(false);
+    setActionError(null);
+    setConfirmation('cancel');
+  };
+
+  const skipExercise = () => {
+    if (!session.canSkipExercise || closingAction) return;
+    if (session.isLastExercise) {
+      openStopConfirmation();
+      return;
+    }
+    session.skipExercise();
+  };
+
+  const playerFooter = (
+    <View style={styles.footerControls}>
+      <View {...queuePanResponderRef.current.panHandlers}>
+        <Pressable
+          onPress={session.openQueue}
+          style={({ pressed }) => [styles.queueTrigger, pressed && styles.queueTriggerPressed]}
+          accessibilityRole="button"
+          accessibilityLabel="Ver todos los ejercicios de la rutina"
+          accessibilityHint="Tocá o deslizá hacia arriba"
+        >
+          <View style={styles.grabber} />
+          <View style={styles.queueTriggerCopy}>
+            <Txt variant="labelTight" tone={color.text}>VER RUTINA</Txt>
+            <Txt variant="metaSm" numberOfLines={1}>{`${session.exerciseNumber}/${session.totalExercises}`}</Txt>
+          </View>
+          <Icon name="chevron-right" size={17} tone={color.textMuted} />
+        </Pressable>
+      </View>
+
+      {actionError && !confirmation ? (
+        <View style={styles.inlineError}>
+          <Txt variant="metaSm" tone="#FF8A92">{actionError}</Txt>
+        </View>
+      ) : null}
+
+      <Button
+        label={closingAction === 'finish' ? 'TERMINANDO…' : session.ctaLabel}
+        onPress={onCta}
+        disabled={!!closingAction}
+        style={styles.cta}
+        haptic={false}
+      />
+      <View style={styles.quickActions}>
+        <PlayerAction
+          icon="skip-next"
+          label="SALTAR"
+          disabled={!session.canSkipExercise || !!closingAction}
+          onPress={skipExercise}
+        />
+        <PlayerAction
+          icon="stop"
+          label="PARAR"
+          disabled={session.phase === 'countdown' || !!closingAction}
+          onPress={openStopConfirmation}
+        />
+        <PlayerAction
+          icon="more"
+          label="OPCIONES"
+          disabled={!!closingAction}
+          onPress={() => {
+            setActionError(null);
+            setOptionsOpen(true);
+          }}
+        />
+      </View>
+    </View>
+  );
+
   return (
-    <Screen padded={false} bottomInset={false}>
+    <Screen
+      padded={false}
+      bottomInset={false}
+      footer={playerFooter}
+      contentStyle={styles.playerBody}
+    >
       <View style={styles.bar}>
         <Pressable
           hitSlop={hitSlop}
@@ -104,25 +363,23 @@ export default function LiveSession() {
         </Pressable>
 
         <View style={styles.barCentre}>
-          <Txt variant="labelSm">ENTRENANDO</Txt>
-          <Txt variant="rowTitle" style={styles.barTitle}>
-            {`${routine.block} · ${routine.name}`}
+          <Txt variant="labelSm">{routine.day ? `DÍA ${routine.day}` : 'SESIÓN ACTIVA'}</Txt>
+          <Txt variant="rowTitle" style={styles.barTitle} numberOfLines={1} ellipsizeMode="tail">
+            {routine.name || routine.block || 'Rutina'}
           </Txt>
         </View>
 
-        <Pressable
-          hitSlop={hitSlop}
-          style={styles.circle}
-          accessibilityRole="button"
-          accessibilityLabel="Más opciones"
-        >
-          <Icon name="more" size={16} tone={color.textMuted} />
-        </Pressable>
+        <View style={styles.circleSpacer} />
       </View>
 
       {/* GIF del movimiento actual; si falla, mostramos la imagen fija del catálogo. */}
       <View style={styles.demoWrap}>
-        <View style={styles.demo}>
+        <View
+          style={[
+            styles.demo,
+            (session.exercise.gifUrl || session.exercise.imageUrl) && styles.demoWithMedia,
+          ]}
+        >
           {session.exercise.gifUrl || session.exercise.imageUrl ? (
             <Image
               source={{
@@ -142,11 +399,6 @@ export default function LiveSession() {
               {`EJERCICIO ${session.exerciseNumber} DE ${session.totalExercises}`}
             </Txt>
           </View>
-          <View style={styles.demoTagRight}>
-            <Txt variant="label" numberOfLines={1}>
-              LOOP 8 s
-            </Txt>
-          </View>
           {!session.exercise.gifUrl && !session.exercise.imageUrl ? (
             <Txt variant="metaSm" tone={color.textFaint} style={styles.demoCaption}>
               No hay una demostración disponible para este ejercicio.
@@ -155,26 +407,37 @@ export default function LiveSession() {
         </View>
       </View>
 
-      <View style={styles.exerciseRow}>
-        <View style={styles.exerciseText}>
-          <Txt variant="h2" numberOfLines={2} style={styles.exerciseName}>
-            {session.exercise.name}
-          </Txt>
-          <Txt variant="meta">{`${session.exercise.scheme} · RIR 2 · bajá en 3 s`}</Txt>
-        </View>
+      <View style={styles.exerciseBlock}>
+        <Txt variant="h2" numberOfLines={2} style={styles.exerciseName}>
+          {session.exercise.name}
+        </Txt>
 
-        <Pressable
-          style={styles.suggested}
-          onPress={() => router.push(`/ejercicio/${session.exercise.id}`)}
-          accessibilityRole="button"
-        >
-          <Txt variant="h5" tone={color.lime}>
-            {session.suggestedShort}
-          </Txt>
-          <Txt variant="labelSm" tone={color.textMuted}>
-            SUGERIDO
-          </Txt>
-        </Pressable>
+        <View style={styles.exerciseSummary}>
+          <View style={styles.metricChip}>
+            <Txt variant="labelTight" tone={color.textSoft} numberOfLines={1}>
+              {`${session.exercise.sets} ${session.exercise.sets === 1 ? 'SERIE' : 'SERIES'}`}
+            </Txt>
+          </View>
+          <View style={styles.metricChip}>
+            <Txt variant="labelTight" tone={color.textSoft} numberOfLines={1}>
+              {`${exerciseRepsLabel} REPS`}
+            </Txt>
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.loadMetric, pressed && styles.loadRowPressed]}
+            onPress={() => router.push(`/ejercicio/${session.exercise.id}`)}
+            accessibilityRole="button"
+            accessibilityLabel={`Ver detalle. Carga sugerida ${session.suggestedShort}`}
+          >
+            <View style={styles.loadCopy}>
+              <Txt variant="labelSm">CARGA</Txt>
+              <Txt variant="labelTight" tone={color.lime} numberOfLines={1}>
+                {session.suggestedShort}
+              </Txt>
+            </View>
+            <Icon name="chevron-right" size={16} tone={color.textMuted} />
+          </Pressable>
+        </View>
       </View>
 
       <View style={styles.clockBlock}>
@@ -191,7 +454,7 @@ export default function LiveSession() {
         </View>
 
         <View style={styles.clockRow}>
-          <Txt variant="clock" tone={session.phaseColor}>
+          <Txt variant="clock" tone={session.phaseColor} style={styles.clockValue}>
             {session.phaseClock}
           </Txt>
           <Txt variant="labelTight" tone={color.textFaint}>
@@ -200,31 +463,149 @@ export default function LiveSession() {
         </View>
       </View>
 
-      <View style={styles.ctaWrap}>
-        <Button
-          label={session.ctaLabel}
-          onPress={onCta}
-          style={styles.cta}
-          haptic={false}
-        />
-      </View>
-
-      <Pressable
-        onPress={session.toggleQueue}
-        style={[styles.drawer, { paddingBottom: insets.bottom + 22 }]}
-        accessibilityRole="button"
+      <Sheet
+        visible={optionsOpen}
+        onClose={() => setOptionsOpen(false)}
+        eyebrow="CONTROL DE SESIÓN"
+        title="Opciones"
       >
-        <View style={styles.grabber} />
-        <Txt variant="labelSm">DESLIZÁ PARA VER LA RUTINA</Txt>
-      </Pressable>
+        <View style={styles.optionsList}>
+          <Pressable
+            onPress={session.toggleSound}
+            style={({ pressed }) => [styles.optionRow, pressed && styles.optionPressed]}
+            accessibilityRole="button"
+            accessibilityLabel={session.soundEnabled ? 'Silenciar sonidos de sesión' : 'Activar sonidos de sesión'}
+          >
+            <View style={styles.optionCopy}>
+              <Txt variant="h5">Sonidos de sesión</Txt>
+              <Txt variant="meta">Avisos durante ejercicios, descansos y finalización.</Txt>
+            </View>
+            <View style={[styles.statusPill, session.soundEnabled && styles.statusPillActive]}>
+              <Txt variant="labelTight" tone={session.soundEnabled ? color.ink : color.textMuted}>
+                {session.soundEnabled ? 'ACTIVOS' : 'SILENCIO'}
+              </Txt>
+            </View>
+          </Pressable>
+
+          <Pressable
+            onPress={openCancelConfirmation}
+            style={({ pressed }) => [styles.optionRow, styles.optionDanger, pressed && styles.optionPressed]}
+            accessibilityRole="button"
+          >
+            <View style={styles.optionCopy}>
+              <Txt variant="h5" tone="#FF5D67">Cancelar rutina</Txt>
+              <Txt variant="meta">Descartar las series de esta sesión.</Txt>
+            </View>
+            <Icon name="close" size={18} tone="#FF5D67" />
+          </Pressable>
+        </View>
+      </Sheet>
+
+      <Sheet
+        visible={confirmation === 'stop'}
+        onClose={() => {
+          if (!closingAction) {
+            setConfirmation(null);
+            setActionError(null);
+          }
+        }}
+        eyebrow="SESIÓN PARCIAL"
+        title="¿Parar acá?"
+      >
+        <View style={styles.confirmationBody}>
+          <View style={styles.confirmationSummary}>
+            <Txt variant="h3" tone={color.lime}>{session.completedSets}</Txt>
+            <View style={styles.confirmationCopy}>
+              <Txt variant="bodyStrong">
+                {session.completedSets === 1 ? 'serie registrada' : 'series registradas'}
+              </Txt>
+              <Txt variant="meta">de {session.totalSets} series planificadas</Txt>
+            </View>
+          </View>
+          <Txt variant="prose">
+            Guardaremos lo que hiciste como una sesión parcial. Sus series se conservan, pero no contará como rutina cumplida.
+          </Txt>
+          {actionError ? (
+            <View style={styles.sheetError}>
+              <Txt variant="meta" tone="#FF8A92">{actionError}</Txt>
+            </View>
+          ) : null}
+          <View style={styles.confirmationActions}>
+            <Button
+              label="SEGUIR ENTRENANDO"
+              variant="outline"
+              size="md"
+              disabled={!!closingAction}
+              onPress={() => {
+                setConfirmation(null);
+                setActionError(null);
+              }}
+            />
+            <Button
+              label={closingAction === 'stop' ? 'GUARDANDO…' : 'PARAR Y GUARDAR'}
+              variant="violet"
+              size="md"
+              disabled={!!closingAction}
+              icon={<Icon name="stop" size={18} tone={color.text} />}
+              onPress={() => void leaveSession('stop')}
+            />
+          </View>
+        </View>
+      </Sheet>
+
+      <Sheet
+        visible={confirmation === 'cancel'}
+        onClose={() => {
+          if (!closingAction) {
+            setConfirmation(null);
+            setActionError(null);
+          }
+        }}
+        eyebrow="ACCIÓN DESTRUCTIVA"
+        title="¿Cancelar rutina?"
+      >
+        <View style={styles.confirmationBody}>
+          <Txt variant="prose">
+            Se eliminarán únicamente las series de esta sesión. La rutina volverá a quedar disponible para empezarla nuevamente.
+          </Txt>
+          {actionError ? (
+            <View style={styles.sheetError}>
+              <Txt variant="meta" tone="#FF8A92">{actionError}</Txt>
+            </View>
+          ) : null}
+          <View style={styles.confirmationActions}>
+            <Button
+              label="VOLVER"
+              variant="outline"
+              size="md"
+              disabled={!!closingAction}
+              onPress={() => {
+                setConfirmation(null);
+                setActionError(null);
+              }}
+            />
+            <Button
+              label={closingAction === 'cancel' ? 'CANCELANDO…' : 'CANCELAR RUTINA'}
+              variant="danger"
+              size="md"
+              disabled={!!closingAction}
+              onPress={() => void leaveSession('cancel')}
+            />
+          </View>
+        </View>
+      </Sheet>
 
       {/* Up-next queue */}
-      <Sheet visible={session.queueOpen} onClose={session.toggleQueue} bare>
+      <Sheet visible={session.queueOpen} onClose={session.closeQueue} bare swipeToDismiss>
         <View style={styles.queueHead}>
           <Txt variant="h4">A continuación</Txt>
           <Txt variant="label">{`${session.remaining} RESTAN`}</Txt>
         </View>
-        <View style={styles.queueList}>
+        <ScrollView
+          style={styles.queueScroll}
+          contentContainerStyle={styles.queueList}
+          showsVerticalScrollIndicator={false}
+        >
           {session.queue.map((item) => (
             <Row
               key={item.id}
@@ -238,11 +619,11 @@ export default function LiveSession() {
               trailingTone={item.current ? color.lime : color.textFaint}
               onPress={() => {
                 session.goTo(item.index);
-                session.toggleQueue();
+                session.closeQueue();
               }}
             />
           ))}
-        </View>
+        </ScrollView>
       </Sheet>
 
       {/* Load picker for the set just closed */}
@@ -355,13 +736,17 @@ export default function LiveSession() {
 }
 
 const styles = StyleSheet.create({
+  playerBody: {
+    paddingTop: 0,
+    minHeight: 0,
+  },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: GUTTER,
-    paddingTop: 12,
-    paddingBottom: 6,
+    paddingTop: 8,
+    paddingBottom: 4,
   },
   circle: {
     width: 34,
@@ -372,70 +757,93 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  barCentre: { alignItems: 'center', gap: 3 },
-  barTitle: { fontSize: 13 },
+  circleSpacer: { width: 34, height: 34 },
+  barCentre: { flex: 1, minWidth: 0, alignItems: 'center', gap: 2, paddingHorizontal: 12 },
+  barTitle: { width: '100%', fontSize: 13, textAlign: 'center' },
 
-  demoWrap: { paddingHorizontal: GUTTER, paddingTop: 10 },
+  demoWrap: {
+    flex: 1,
+    minHeight: 164,
+    paddingTop: 7,
+  },
   demo: {
-    height: 260,
-    borderRadius: 30,
+    flex: 1,
+    borderRadius: 0,
     borderWidth: 1,
     borderColor: color.border,
     backgroundColor: color.surface,
     justifyContent: 'flex-end',
-    padding: 18,
+    padding: 14,
+    overflow: 'hidden',
+  },
+  demoWithMedia: {
+    borderWidth: 0,
+    backgroundColor: '#FFFFFF',
   },
   demoMedia: {
     position: 'absolute',
-    top: 46,
-    right: 18,
-    bottom: 36,
-    left: 18,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
   },
   demoTagLeft: {
     position: 'absolute',
-    top: 16,
-    left: 16,
+    top: 12,
+    left: 12,
     backgroundColor: color.violet,
     borderRadius: radius.pill,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-  },
-  demoTagRight: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: color.glass,
-    borderWidth: 1,
-    borderColor: color.border,
-    borderRadius: radius.pill,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
   },
   demoCaption: { alignSelf: 'flex-start' },
 
-  exerciseRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 16,
+  exerciseBlock: {
+    gap: 7,
     paddingHorizontal: GUTTER,
-    paddingTop: 20,
+    paddingTop: 9,
   },
-  exerciseText: { flex: 1, gap: 5 },
-  exerciseName: { fontSize: 29, lineHeight: 30 },
-  suggested: {
+  exerciseName: { fontSize: 20, lineHeight: 22 },
+  exerciseSummary: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  metricChip: {
+    minHeight: 42,
+    justifyContent: 'center',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surfaceAlt,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  loadMetric: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
     backgroundColor: color.surface,
     borderWidth: 1,
-    borderColor: color.lime,
-    borderRadius: radius.md,
-    paddingVertical: 11,
-    paddingHorizontal: 14,
-    alignItems: 'flex-end',
-    gap: 2,
+    borderColor: color.border,
+    borderRadius: radius.pill,
+    paddingVertical: 4,
+    paddingLeft: 12,
+    paddingRight: 9,
+  },
+  loadRowPressed: { opacity: 0.75 },
+  loadCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 0,
   },
 
-  clockBlock: { paddingHorizontal: GUTTER, paddingTop: 14, gap: 10 },
+  clockBlock: { paddingHorizontal: GUTTER, paddingTop: 8, gap: 4 },
   phaseRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -447,18 +855,127 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'baseline',
     justifyContent: 'center',
+    gap: 7,
+  },
+  clockValue: { fontSize: 62, lineHeight: 68 },
+
+  footerControls: {
+    gap: 7,
+    paddingHorizontal: GUTTER,
+    backgroundColor: color.screen,
+  },
+  cta: { height: 52 },
+  quickActions: {
+    flexDirection: 'row',
     gap: 8,
-    paddingTop: 6,
+  },
+  playerAction: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+  },
+  playerActionPressed: { backgroundColor: color.raised, transform: [{ scale: 0.98 }] },
+  playerActionDisabled: { opacity: 0.38 },
+  queueTrigger: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surfaceAlt,
+    paddingTop: 10,
+    paddingBottom: 6,
+    paddingHorizontal: 14,
+  },
+  queueTriggerPressed: { backgroundColor: color.surface },
+  queueTriggerCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  grabber: {
+    position: 'absolute',
+    top: 5,
+    left: '50%',
+    width: 46,
+    height: 4,
+    marginLeft: -23,
+    borderRadius: radius.pill,
+    backgroundColor: color.border,
+  },
+  inlineError: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,93,103,0.45)',
+    backgroundColor: 'rgba(255,93,103,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
 
-  ctaWrap: { paddingHorizontal: GUTTER, paddingTop: 20 },
-  cta: { height: 66 },
-
-  drawer: { marginTop: 'auto', alignItems: 'center', gap: 9, paddingTop: 18 },
-  grabber: { width: 46, height: 4, borderRadius: radius.pill, backgroundColor: color.border },
-
   queueHead: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  queueScroll: { maxHeight: 420 },
   queueList: { gap: 8 },
+
+  optionsList: { gap: 10 },
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    minHeight: 72,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: radius.lg,
+    backgroundColor: color.raised,
+    borderWidth: 1,
+    borderColor: color.border,
+  },
+  optionCopy: { flex: 1, gap: 4 },
+  optionPressed: { opacity: 0.72 },
+  optionDanger: { borderColor: '#FF5D67' },
+  statusPill: {
+    minWidth: 76,
+    alignItems: 'center',
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: color.border,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  statusPillActive: { borderColor: color.lime, backgroundColor: color.lime },
+
+  confirmationBody: { gap: 16 },
+  confirmationSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surfaceAlt,
+    padding: 16,
+  },
+  confirmationCopy: { flex: 1, gap: 2 },
+  confirmationActions: { gap: 9 },
+  sheetError: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,93,103,0.45)',
+    backgroundColor: 'rgba(255,93,103,0.08)',
+    padding: 12,
+  },
 
   keypadBlock: { gap: 14 },
   readout: {

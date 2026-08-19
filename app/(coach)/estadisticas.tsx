@@ -151,7 +151,7 @@ function StatsContent({
       </View>
 
       <View style={styles.grid}>
-        <StatTile value={String(summary.completedRoutines)} label="SESIONES REALIZADAS" valueTone={color.lime} />
+        <StatTile value={String(summary.sessions)} label="SESIONES REALIZADAS" valueTone={color.lime} />
         <StatTile value={hoursMinutes(summary.totalMinutes)} label="TIEMPO ESTIMADO" />
         <StatTile value={`${summary.completionRate} %`} label="CUMPLIMIENTO" />
       </View>

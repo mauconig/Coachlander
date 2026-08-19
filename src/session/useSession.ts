@@ -34,6 +34,8 @@ const EMPTY_EXERCISE: Exercise = {
 };
 
 export type UseSessionOptions = {
+  /** Prevent the screen from recreating a runtime while it is being closed. */
+  enabled?: boolean;
   unit?: Unit;
   estimatedMinutes?: number;
   routineId?: string;
@@ -48,6 +50,7 @@ export type UseSessionOptions = {
 
 export function useSession(exercises: Exercise[], options: UseSessionOptions = {}) {
   const {
+    enabled = true,
     unit = 'kg',
     estimatedMinutes = 48,
     routineId = 'local-session',
@@ -61,8 +64,9 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
   const state = runtime?.state ?? fallbackState;
 
   useEffect(() => {
+    if (!enabled) return;
     context.ensureSession({ routineId, routineTitle, exercises, onSetLogged });
-  }, [context.ensureSession, exercises, onSetLogged, routineId, routineTitle]);
+  }, [context.ensureSession, enabled, exercises, onSetLogged, routineId, routineTitle]);
 
   const exercise = sessionExercises[state.exIndex] ?? EMPTY_EXERCISE;
   const reps = repsOfScheme(exercise.scheme);
@@ -90,6 +94,10 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
     onSetLogged?.({ exerciseId: exercise.id, setIndex: index, load, reps });
   }, [dispatch, exercise.id, exercise.rest, onSetLogged, reps, state.soundEnabled]);
 
+  const toggleQueue = useCallback(() => dispatch({ type: 'toggleQueue' }), [dispatch]);
+  const openQueue = useCallback(() => dispatch({ type: 'setQueue', open: true }), [dispatch]);
+  const closeQueue = useCallback(() => dispatch({ type: 'setQueue', open: false }), [dispatch]);
+
   useEffect(() => {
     if (!runtime || !exerciseComplete || isLastExercise || state.phase === 'countdown') return;
     const id = setTimeout(() => goTo(state.exIndex + 1), 700);
@@ -98,20 +106,20 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
 
   const derived = useMemo(() => {
     const phaseLabel = state.phase === 'countdown'
-      ? 'PREPARANDO SESIÓN'
+      ? 'PREPARANDO'
       : resting
         ? 'DESCANSO'
         : exerciseComplete
           ? 'EJERCICIO COMPLETO'
           : state.phase === 'overtime'
-            ? `TIEMPO CUMPLIDO · SERIE ${pending + 1}`
-            : `SERIE ${pending + 1} EN CURSO`;
+            ? 'SOBRETIEMPO'
+            : 'EN CURSO';
     const ctaLabel = state.phase === 'countdown'
       ? 'SALTAR'
       : resting
-        ? 'Saltar descanso'
+        ? 'SALTAR DESCANSO'
         : sessionComplete
-          ? 'Terminar sesión'
+          ? 'TERMINAR RUTINA'
           : exerciseComplete
             ? 'Siguiente ejercicio'
             : `Serie ${pending + 1} hecha`;
@@ -154,6 +162,9 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
     exerciseComplete,
     sessionComplete,
     totalExercises: sessionExercises.length,
+    totalSets: sessionExercises.reduce((totalSets, item) => totalSets + item.sets, 0),
+    completedSets: state.completedSets ?? done,
+    isLastExercise,
     remoteStarted: runtime?.remoteStarted ?? false,
     press: () => {
       if (state.phase === 'countdown') {
@@ -183,8 +194,16 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
     openKeypad: () => dispatch({ type: 'openKeypad' }),
     closeSheet: () => dispatch({ type: 'closeSheet', now: Date.now() }),
     pressKey: (key: string) => dispatch({ type: 'press', key }),
-    toggleQueue: () => dispatch({ type: 'toggleQueue' }),
+    toggleQueue,
+    openQueue,
+    closeQueue,
     goTo,
+    canSkipExercise: state.phase !== 'countdown' && sessionExercises.length > 0,
+    skipExercise: () => {
+      if (isLastExercise) return false;
+      goTo(state.exIndex + 1);
+      return true;
+    },
     minimize: () => dispatch({ type: 'minimize' }),
     restore: () => dispatch({ type: 'restore' }),
     togglePaused: () => dispatch({ type: 'togglePaused', now: Date.now() }),

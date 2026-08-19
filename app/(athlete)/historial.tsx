@@ -90,7 +90,8 @@ function toCoachSession(session: SessionRecord): CoachHistorySession {
     minutes: session.minutes,
     sets: session.sets,
     volumeKg: session.volume,
-    completion: 100,
+    completion: session.status === 'completed' ? 100 : 0,
+    status: session.status,
   };
 }
 
@@ -139,7 +140,7 @@ export default function History() {
         onMonthChange={changeMonth}
       />
 
-      <Txt variant="meta" tone={color.textMuted}>{`${monthSessions} sesiones completadas en ${displayMonth(month)}`}</Txt>
+      <Txt variant="meta" tone={color.textMuted}>{`${monthSessions} sesiones realizadas en ${displayMonth(month)}`}</Txt>
 
       {selectedDate ? (
         <View style={styles.daySessions}>

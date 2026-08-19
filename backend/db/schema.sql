@@ -116,6 +116,20 @@ ALTER TABLE routine
 ALTER TABLE routine
   ADD COLUMN IF NOT EXISTS load_mode TEXT NOT NULL DEFAULT 'coach';
 
+ALTER TABLE routine
+  ADD COLUMN IF NOT EXISTS session_status TEXT NOT NULL DEFAULT 'scheduled';
+
+ALTER TABLE routine
+  ADD COLUMN IF NOT EXISTS session_ended_at TIMESTAMPTZ;
+
+UPDATE routine
+   SET session_status = 'completed'
+ WHERE completed_at IS NOT NULL
+   AND session_status = 'scheduled';
+
+CREATE INDEX IF NOT EXISTS idx_routine_session_status
+  ON routine (athlete_id, session_status, session_ended_at);
+
 CREATE INDEX IF NOT EXISTS idx_routine_athlete_plan
   ON routine (athlete_id, plan_id);
 
@@ -139,8 +153,12 @@ CREATE TABLE IF NOT EXISTS client (
   live_set_index INTEGER,
   live_total_sets INTEGER,
   live_elapsed TEXT,
+  live_session_started_at TIMESTAMPTZ,
   position INTEGER NOT NULL
 );
+
+ALTER TABLE client
+  ADD COLUMN IF NOT EXISTS live_session_started_at TIMESTAMPTZ;
 
 ALTER TABLE client
   ADD COLUMN IF NOT EXISTS clerk_user_id TEXT;
