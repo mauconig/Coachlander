@@ -8,7 +8,6 @@
     "scheme": "tempo",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0A0A0C",
-    "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.coachlander.tempo",
@@ -43,7 +42,8 @@
       ],
       "expo-secure-store",
       "expo-web-browser",
-      "@clerk/expo"
+      "@clerk/expo",
+      "expo-image"
     ],
     "experiments": {
       "typedRoutes": true

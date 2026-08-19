@@ -1,5 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -18,6 +20,7 @@ export default function ExerciseDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { unit } = useApp();
   const insets = useSafeAreaInsets();
+  const [mediaFailed, setMediaFailed] = useState(false);
   const coach = useQuery(getCoach);
   const exercise = useQuery((db) => getExercise(db, id) ?? getExercises(db)[0], [id]);
   const last = exercise.lastTime;
@@ -41,9 +44,18 @@ export default function ExerciseDetail() {
               <Txt variant="label">VIDEO DEMO 0:24</Txt>
             </View>
           </View>
-          <Txt variant="metaSm" tone={color.textFaint}>
-            [ demo del movimiento ]
-          </Txt>
+          {exercise.gifUrl || exercise.imageUrl ? (
+            <Image
+              source={{ uri: mediaFailed ? exercise.imageUrl : exercise.gifUrl ?? exercise.imageUrl }}
+              style={styles.heroMedia}
+              contentFit="contain"
+              autoplay
+              onError={() => setMediaFailed(true)}
+              accessibilityLabel={`Demostración de ${exercise.name}`}
+            />
+          ) : (
+            <Txt variant="metaSm" tone={color.textFaint}>[ demo del movimiento ]</Txt>
+          )}
         </View>
 
         <View style={styles.body}>
@@ -54,6 +66,7 @@ export default function ExerciseDetail() {
             <Txt variant="h2" style={styles.title}>
               {exercise.name}
             </Txt>
+            {exercise.attribution ? <Txt variant="metaSm" tone={color.textFaint}>{exercise.attribution}</Txt> : null}
           </View>
 
           <View style={styles.stats}>
@@ -105,8 +118,10 @@ const styles = StyleSheet.create({
   hero: {
     backgroundColor: color.surface,
     justifyContent: 'flex-end',
+    alignItems: 'center',
     padding: 20,
   },
+  heroMedia: { width: 150, height: 140, marginTop: 26 },
   heroBar: {
     position: 'absolute',
     left: GUTTER,

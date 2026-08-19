@@ -1,0 +1,65 @@
+env: load .env.local
+env: export CLERK_SECRET_KEY DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL ENABLE_EPHEMERAL_TEST_ACCOUNT EPHEMERAL_TEST_EMAIL EPHEMERAL_TEST_PASSWORD EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY EXPO_PUBLIC_EPHEMERAL_TEST_EMAIL
+Starting project at C:\code\Coachlander
+Logs: C:\code\Coachlander\.expo\dev\logs\start.log
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Starting Metro Bundler
+
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Waiting on http://localhost:8081
+Logs for your project will appear below.
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 7144ms node_modules\expo-router\entry.js (2215 modules)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 651ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+ ERROR  Project is incompatible with this version of Expo Go
+
+This project requires a newer version of Expo Go.
+
+How to fix this error:
+Download the latest version of Expo Go from the Play Store.
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 5460ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  [Coachlander] No se pudo actualizar el perfil [ApiError: Invalid session]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: java.net.UnknownHostException: Unable to resolve host "coachlander.147-93-180-120.sslip.io": No address associated with hostname]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: java.net.UnknownHostException: Unable to resolve host "coachlander.147-93-180-120.sslip.io": No address associated with hostname]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: java.net.UnknownHostException: Unable to resolve host "coachlander.147-93-180-120.sslip.io": No address associated with hostname]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: java.net.UnknownHostException: Unable to resolve host "coachlander.147-93-180-120.sslip.io": No address associated with hostname]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: java.net.UnknownHostException: Unable to resolve host "coachlander.147-93-180-120.sslip.io": No address associated with hostname]
+ WARN  [Coachlander] No se pudo actualizar el perfil [Error: fetch failed: java.net.UnknownHostException: Unable to resolve host "coachlander.147-93-180-120.sslip.io": No address associated with hostname]
+ WARN  [Coachlander] No se pudo actualizar el perfil [ApiError: API 502]
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Android Bundled 67ms node_modules\expo-router\entry.js (1 module)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview

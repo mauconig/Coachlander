@@ -51,6 +51,45 @@ ALTER TABLE exercise
 ALTER TABLE exercise
   ADD COLUMN IF NOT EXISTS target_reps INTEGER NOT NULL DEFAULT 0;
 
+ALTER TABLE exercise
+  ADD COLUMN IF NOT EXISTS catalog_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_exercise_catalog_id
+  ON exercise (catalog_id);
+
+CREATE TABLE IF NOT EXISTS exercise_catalog (
+  id TEXT PRIMARY KEY,
+  name_en TEXT NOT NULL,
+  name_es TEXT NOT NULL,
+  category_en TEXT NOT NULL,
+  category_es TEXT NOT NULL,
+  body_part_en TEXT NOT NULL,
+  body_part_es TEXT NOT NULL,
+  equipment_en TEXT NOT NULL,
+  equipment_es TEXT NOT NULL,
+  target_en TEXT NOT NULL,
+  target_es TEXT NOT NULL,
+  muscle_group_en TEXT NOT NULL,
+  muscle_group_es TEXT NOT NULL,
+  secondary_muscles_en TEXT[] NOT NULL DEFAULT '{}',
+  secondary_muscles_es TEXT[] NOT NULL DEFAULT '{}',
+  muscle_groups TEXT[] NOT NULL DEFAULT '{}',
+  instructions_es TEXT NOT NULL DEFAULT '',
+  instruction_steps_es TEXT[] NOT NULL DEFAULT '{}',
+  image_url TEXT,
+  gif_url TEXT,
+  attribution TEXT NOT NULL DEFAULT '© Gym visual — https://gymvisual.com/',
+  source TEXT NOT NULL DEFAULT 'hasaneyldrm/exercises-dataset',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_exercise_catalog_name_es
+  ON exercise_catalog (name_es);
+
+CREATE INDEX IF NOT EXISTS idx_exercise_catalog_body_part_es
+  ON exercise_catalog (body_part_es);
+
 CREATE TABLE IF NOT EXISTS routine (
   id TEXT PRIMARY KEY,
   plan_id TEXT,

@@ -130,6 +130,7 @@ export default function TemplateDetail() {
                   key={exercise.id}
                   left={<Txt variant="labelTight" tone={color.lime}>{String(index + 1).padStart(2, '0')}</Txt>}
                   title={exercise.name}
+                  titleNumberOfLines={2}
                   meta={`${exercise.sets} × ${exercise.reps}`}
                 />
               ))}

@@ -11,6 +11,7 @@ type Props = {
   /** colour override for the meta line — lime flags something needing attention */
   metaTone?: string;
   titleTone?: string;
+  titleNumberOfLines?: number;
   /** leading slot: index number, avatar, icon */
   left?: ReactNode;
   /** trailing slot; falls back to `trailing` text or a chevron */
@@ -33,6 +34,7 @@ export function Row({
   meta,
   metaTone,
   titleTone,
+  titleNumberOfLines = 1,
   left,
   right,
   trailing,
@@ -56,7 +58,7 @@ export function Row({
     <>
       {left}
       <View style={styles.text}>
-        <Txt variant="rowTitle" tone={titleTone} numberOfLines={1}>
+        <Txt variant="rowTitle" tone={titleTone} numberOfLines={titleNumberOfLines}>
           {title}
         </Txt>
         {meta ? (

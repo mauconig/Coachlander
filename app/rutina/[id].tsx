@@ -3,11 +3,12 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { assignTemplate, updateRoutine, type UpdateRoutineInput } from '@/api/client';
+import { assignTemplate, updateRoutine, type CatalogExerciseSummary, type CatalogMuscle, type UpdateRoutineInput } from '@/api/client';
 import { AppLoadingScreen } from '@/components/AppLoadingScreen';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { CoachLoadModePicker, type CoachLoadMode } from '@/components/CoachLoadModePicker';
+import { ExerciseCatalogExerciseList, ExerciseCatalogMuscleList } from '@/components/ExerciseCatalogPicker';
 import { Field } from '@/components/Field';
 import { Icon } from '@/components/Icon';
 import { Row } from '@/components/Row';
@@ -18,7 +19,7 @@ import { StatTile } from '@/components/StatTile';
 import { BackButton } from '@/components/TopBar';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
-import { getClient, getCurrentWeekStart, getExercises, getOverloadRows, getRoutineById, getTemplates, weekIndexOf } from '@/db/queries';
+import { getClient, getCurrentWeekStart, getOverloadRows, getRoutineById, getTemplates, weekIndexOf } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import type { Exercise, OverloadRow } from '@/data/types';
 import { num } from '@/lib/format';
@@ -53,12 +54,17 @@ function draftId(): string {
   return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function draftFromCatalog(exercise: Exercise): DraftExercise {
+function draftFromCatalogSummary(exercise: CatalogExerciseSummary, fallbackFocus: string): DraftExercise {
+  const draft = blankDraft(exercise.focus || fallbackFocus);
   return {
-    ...exercise,
-    id: draftId(),
-    reps: repsFromScheme(exercise.scheme),
-    persistedId: null,
+    ...draft,
+    name: exercise.name,
+    focus: exercise.focus || fallbackFocus,
+    equipment: exercise.equipment,
+    target: exercise.target,
+    imageUrl: exercise.imageUrl ?? undefined,
+    gifUrl: exercise.gifUrl ?? undefined,
+    muscleGroups: exercise.muscleGroups,
   };
 }
 
@@ -160,7 +166,6 @@ export default function RoutineDetail() {
     return result;
   }, [routine?.id]);
   const templates = useQuery(getTemplates);
-  const catalog = useQuery(getExercises);
   const [draft, setDraft] = useState<DraftExercise[]>([]);
   const [baseline, setBaseline] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -407,7 +412,6 @@ export default function RoutineDetail() {
 
       <AddExerciseSheet
         visible={addOpen}
-        catalog={catalog}
         focus={routine.block}
         onClose={() => setAddOpen(false)}
         onAdd={addExercise}
@@ -496,7 +500,7 @@ function ExerciseRow({
             {`${exercise.loadSource === 'ai' ? 'IA' : 'ENTRENADOR'} · ${exercise.loadReason || 'Carga definida en el plan.'}`}
           </Txt>
           <Txt variant="metaSm" tone={color.textMuted} numberOfLines={1}>{progressionLabel}</Txt>
-          <Txt variant="rowTitle" numberOfLines={1}>{exercise.name || 'Ejercicio sin nombre'}</Txt>
+          <Txt variant="rowTitle" numberOfLines={2}>{exercise.name || 'Ejercicio sin nombre'}</Txt>
           <Txt variant="meta" tone={color.textMuted} numberOfLines={1}>
             {`${exercise.sets} series · ${exercise.reps} reps · ${load}`}
           </Txt>
@@ -646,81 +650,36 @@ function ExerciseEditSheet({
 
 function AddExerciseSheet({
   visible,
-  catalog,
   focus,
   onClose,
   onAdd,
 }: {
   visible: boolean;
-  catalog: Exercise[];
   focus: string;
   onClose: () => void;
   onAdd: (exercise: DraftExercise) => void;
 }) {
-  const [query, setQuery] = useState('');
-  const [manualName, setManualName] = useState('');
+  const [muscle, setMuscle] = useState<CatalogMuscle | null>(null);
 
   useEffect(() => {
     if (!visible) {
-      setQuery('');
-      setManualName('');
+      setMuscle(null);
     }
   }, [visible]);
 
-  const filtered = catalog
-    .filter((exercise) => exercise.name.toLowerCase().includes(query.trim().toLowerCase()))
-    .slice(0, 16);
-
   return (
     <Sheet visible={visible} onClose={onClose} eyebrow="AGREGAR EJERCICIO" title="Sumá un ejercicio">
-      <ScrollView
-        style={styles.sheetScroll}
-        contentContainerStyle={styles.sheetContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <Field
-          label="BUSCAR EN CATÁLOGO"
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Ej: sentadilla, press, remo"
-          autoCapitalize="none"
-          autoFocus={visible}
+      {muscle ? (
+        <ExerciseCatalogExerciseList
+          muscle={muscle}
+          compact
+          onBack={() => setMuscle(null)}
+          onAdd={(exercise) => onAdd(draftFromCatalogSummary(exercise, focus))}
+          onCreate={(name) => onAdd({ ...blankDraft(focus), name })}
         />
-        {filtered.length ? (
-          <View style={styles.catalogList}>
-            <SectionHeader title="CATÁLOGO" />
-            {filtered.map((exercise) => (
-              <Row
-                key={exercise.id}
-                title={exercise.name}
-                meta={`${exercise.sets} series · ${repsFromScheme(exercise.scheme)} reps`}
-                right={<Icon name="plus" size={17} tone={color.lime} />}
-                onPress={() => onAdd(draftFromCatalog(exercise))}
-              />
-            ))}
-          </View>
-        ) : null}
-
-        <View style={styles.manualDivider}>
-          <View style={styles.rule} />
-          <Txt variant="label" tone={color.textFaint}>O CREALO</Txt>
-          <View style={styles.rule} />
-        </View>
-        <Field
-          label="NOMBRE NUEVO"
-          value={manualName}
-          onChangeText={setManualName}
-          placeholder="Ej: Press inclinado con mancuernas"
-          autoCapitalize="sentences"
-        />
-        <Button
-          label="Agregar ejercicio nuevo"
-          variant="outline"
-          disabled={!manualName.trim()}
-          onPress={() => onAdd({ ...blankDraft(focus), name: manualName.trim() })}
-        />
-      </ScrollView>
+      ) : (
+        <ExerciseCatalogMuscleList compact onSelect={setMuscle} />
+      )}
     </Sheet>
   );
 }
@@ -818,9 +777,6 @@ const styles = StyleSheet.create({
   sheetScroll: { maxHeight: 560 },
   sheetContent: { gap: 15, paddingBottom: 4 },
   sheetButton: { marginTop: 2 },
-  catalogList: { gap: 8 },
-  manualDivider: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 2 },
-  rule: { flex: 1, height: 1, backgroundColor: color.border },
   newRoutine: {
     backgroundColor: color.surfaceAlt,
     borderWidth: 1,

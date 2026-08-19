@@ -1,0 +1,28 @@
+env: load .env.local
+env: export CLERK_SECRET_KEY DEEPSEEK_API_KEY DEEPSEEK_BASE_URL DEEPSEEK_MODEL ENABLE_EPHEMERAL_TEST_ACCOUNT EPHEMERAL_TEST_EMAIL EPHEMERAL_TEST_PASSWORD EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY EXPO_PUBLIC_EPHEMERAL_TEST_EMAIL
+Starting project at C:\code\Coachlander
+Logs: C:\code\Coachlander\.expo\dev\logs\start.log
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Starting Metro Bundler
+
+warning: Bundler cache is empty, rebuilding (this may take a minute)
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+Waiting on http://localhost:8082
+Logs for your project will appear below.
+Android Bundled 6280ms node_modules\expo-router\entry.js (2215 modules)
+ WARN  Clerk: Clerk has been loaded with development keys. Development instances have strict usage limits and should not be used when deploying your application to production. Learn more: https://clerk.com/docs/deployments/overview
+ WARN  InteractionManager has been deprecated and will be removed in a future release. Please refactor long tasks into smaller ones, and  use 'requestIdleCallback' instead.

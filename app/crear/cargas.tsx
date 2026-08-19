@@ -232,7 +232,7 @@ export default function CoachLoadAssignment() {
               {day.exercises.map((exercise) => (
                 <View key={loadKey(exercise)} style={styles.exercise}>
                   <View style={styles.exerciseCopy}>
-                    <Txt variant="rowTitle">{exercise.name}</Txt>
+                    <Txt variant="rowTitle" numberOfLines={2}>{exercise.name}</Txt>
                     <Txt variant="meta" tone={color.textMuted}>{`${exercise.sets} × ${exercise.reps}`}</Txt>
                   </View>
                   <Field

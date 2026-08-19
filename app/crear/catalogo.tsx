@@ -1,37 +1,42 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useEffect } from 'react';
+import { StyleSheet, View } from 'react-native';
 
-import { Button } from '@/components/Button';
-import { Card } from '@/components/Card';
-import { Field } from '@/components/Field';
-import { Icon } from '@/components/Icon';
-import { Row } from '@/components/Row';
+import { ExerciseCatalogExerciseList } from '@/components/ExerciseCatalogPicker';
 import { Screen } from '@/components/Screen';
 import { TopBar } from '@/components/TopBar';
-import { Txt } from '@/components/Txt';
-import { getExercises } from '@/db/queries';
-import { useQuery } from '@/db/useQuery';
+import type { CatalogExerciseSummary, CatalogMuscle } from '@/api/client';
 import { useCreator } from '@/state/CreatorState';
-import { color, radius } from '@/theme/tokens';
 
-/** 21 · Catálogo — elegí ejercicios de la biblioteca o creá uno nuevo. */
+function paramValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
 export default function ExerciseCatalog() {
-  const { day } = useLocalSearchParams<{ day: string }>();
-  const dayNumber = Number(day) || 1;
+  const params = useLocalSearchParams<{
+    day?: string | string[];
+    muscle?: string | string[];
+    label?: string | string[];
+    count?: string | string[];
+  }>();
+  const dayNumber = Number(paramValue(params.day)) || 1;
+  const muscleKey = paramValue(params.muscle);
+  const muscle: CatalogMuscle = {
+    key: muscleKey,
+    label: paramValue(params.label) || muscleKey,
+    count: Number(paramValue(params.count)) || 0,
+  };
   const { addExercise } = useCreator();
-  const library = useQuery(getExercises);
-  const [query, setQuery] = useState('');
-  const [customName, setCustomName] = useState('');
 
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return q ? library.filter((exercise) => exercise.name.toLowerCase().includes(q)) : library;
-  }, [library, query]);
+  useEffect(() => {
+    if (!muscleKey) router.replace({ pathname: '/crear/musculos', params: { day: String(dayNumber) } });
+  }, [dayNumber, muscleKey]);
 
-  const addFromLibrary = (name: string) => {
+  if (!muscleKey) return null;
+
+  const addFromLibrary = (exercise: CatalogExerciseSummary) => {
     addExercise(dayNumber, {
-      name,
+      name: exercise.name,
       sets: 3,
       reps: '8-10',
       loadKg: null,
@@ -41,9 +46,7 @@ export default function ExerciseCatalog() {
     router.back();
   };
 
-  const addCustom = () => {
-    const name = customName.trim();
-    if (!name) return;
+  const addCustom = (name: string) => {
     addExercise(dayNumber, {
       name,
       sets: 3,
@@ -56,56 +59,20 @@ export default function ExerciseCatalog() {
   };
 
   return (
-    <Screen scroll gap={16}>
-      <TopBar title={`DÍA ${dayNumber} · AGREGAR EJERCICIO`} />
-
-      <Field
-        label="BUSCAR EN EL CATÁLOGO"
-        value={query}
-        onChangeText={setQuery}
-        placeholder="Ej: press, sentadilla, remo"
-        autoCapitalize="none"
-      />
-
-      <Card tone="muted" padding={16} gap={12}>
-        <Txt variant="label">CREAR EJERCICIO NUEVO</Txt>
-        <Field
-          label="NOMBRE"
-          value={customName}
-          onChangeText={setCustomName}
-          placeholder="Ej: Prensa de hombro con mancuernas"
+    <Screen padded={false} gap={0}>
+      <View style={styles.content}>
+        <TopBar title={`DÍA ${dayNumber} · EJERCICIOS`} />
+        <ExerciseCatalogExerciseList
+          muscle={muscle}
+          onBack={() => router.back()}
+          onAdd={addFromLibrary}
+          onCreate={addCustom}
         />
-        <Button label="Agregar ejercicio nuevo" variant="violet" size="sm" onPress={addCustom} />
-      </Card>
-
-      <View style={styles.list}>
-        <Txt variant="label" tone={color.textMuted}>
-          {`CATÁLOGO · ${results.length}`}
-        </Txt>
-        {results.map((exercise) => (
-          <Row
-            key={exercise.id}
-            left={<Icon name="plus" size={14} tone={color.lime} weight={2.6} />}
-            title={exercise.name}
-            meta={`${exercise.scheme}`}
-            right={
-              <Pressable
-                hitSlop={8}
-                onPress={() => addFromLibrary(exercise.name)}
-                accessibilityRole="button"
-                accessibilityLabel={`Agregar ${exercise.name}`}
-              >
-                <Icon name="chevron-right" size={16} tone={color.textMuted} />
-              </Pressable>
-            }
-            onPress={() => addFromLibrary(exercise.name)}
-          />
-        ))}
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { gap: 9 },
+  content: { flex: 1, paddingHorizontal: 22, gap: 10 },
 });

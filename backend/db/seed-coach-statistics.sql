@@ -26,6 +26,30 @@ BEGIN
 END
 $$;
 
+-- Los clientes demo se crean desde la cuenta del coach y no pasan por el
+-- formulario de onboarding del atleta. Completar sólo perfiles demo que aún
+-- no tienen medidas, sin sobrescribir datos reales ya cargados.
+UPDATE app_user u
+SET weight_kg = COALESCE(u.weight_kg, CASE c.id
+  WHEN 'client-lucia' THEN 62
+  WHEN 'client-mateo' THEN 78
+  WHEN 'client-valentina' THEN 58
+  WHEN 'client-joaquin' THEN 84
+  WHEN 'client-camila' THEN 67
+END),
+    height_m = COALESCE(u.height_m, CASE c.id
+      WHEN 'client-lucia' THEN 1.65
+      WHEN 'client-mateo' THEN 1.78
+      WHEN 'client-valentina' THEN 1.62
+      WHEN 'client-joaquin' THEN 1.82
+      WHEN 'client-camila' THEN 1.68
+    END),
+    updated_at = NOW()
+FROM client c
+WHERE c.clerk_user_id = u.clerk_user_id
+  AND c.id IN ('client-lucia', 'client-mateo', 'client-valentina', 'client-joaquin', 'client-camila')
+  AND u.role = 'athlete';
+
 CREATE TEMP TABLE seed_cleanup_routines (id TEXT PRIMARY KEY) ON COMMIT DROP;
 CREATE TEMP TABLE seed_cleanup_exercises (id TEXT PRIMARY KEY) ON COMMIT DROP;
 
@@ -231,7 +255,8 @@ BEGIN
           ORDER BY position
         LOOP
           metric := te.progression_metric;
-          target_reps := COALESCE(NULLIF((regexp_match(te.reps, '([0-9]+)(?:[^0-9]*)$'))[1], '')::INTEGER, 8);
+          -- En rangos como 8-10, 8 es el mínimo válido para completar el objetivo.
+          target_reps := COALESCE(NULLIF((regexp_match(te.reps, '([0-9]+)'))[1], '')::INTEGER, 8);
           previous_load := NULL;
           previous_target := NULL;
           previous_success := FALSE;

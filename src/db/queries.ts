@@ -29,6 +29,8 @@ const nullableNumber = (row: Row | undefined, key: string): number | null => {
   return Number.isFinite(Number(value)) ? Number(value) : null;
 };
 const booleanValue = (row: Row | undefined, key: string) => row?.[key] === true || row?.[key] === 1;
+const stringArrayValue = (row: Row | undefined, key: string): string[] =>
+  Array.isArray(row?.[key]) ? (row?.[key] as unknown[]).filter((value): value is string => typeof value === 'string') : [];
 
 const MUSCLE_LABELS: Record<string, string> = {
   pecho: 'Pecho',
@@ -72,7 +74,19 @@ export type CoachRecord = {
 };
 
 export function getCoach(data: RemoteData): CoachRecord {
-  const row = first(data, 'coach');
+  const athleteId = data.user?.id;
+  const assignedRoutine =
+    data.user?.role === 'athlete' && !data.user.soloTraining
+      ? rows(data, 'routine')
+          .filter((routine) => stringValue(routine, 'athlete_id') === athleteId && stringValue(routine, 'coach_id'))
+          .sort((a, b) => Number(b.is_today) - Number(a.is_today))[0]
+      : undefined;
+  const assignedCoachId = stringValue(assignedRoutine, 'coach_id');
+  const row = assignedCoachId
+    ? rows(data, 'coach').find((coach) => stringValue(coach, 'id') === assignedCoachId)
+    : data.user?.role === 'athlete' && !data.user.soloTraining
+      ? undefined
+      : first(data, 'coach');
   return {
     name: stringValue(row, 'name'),
     shortName: stringValue(row, 'short_name'),
@@ -94,14 +108,27 @@ export type AthleteRecord = {
 
 export function getAthlete(data: RemoteData): AthleteRecord {
   const row = first(data, 'athlete');
+  const athleteId = data.user?.id;
+  const completedRoutines = rows(data, 'routine').filter(
+    (routine) =>
+      (!athleteId || stringValue(routine, 'athlete_id') === athleteId) &&
+      Boolean(stringValue(routine, 'completed_at')),
+  );
+  const totalSessions = completedRoutines.length;
+  const completedWeeks = new Set(
+    completedRoutines.map((routine) =>
+      weekStartFromDate(dateOnly(stringValue(routine, 'completed_at'))),
+    ),
+  );
+  const streakWeeks = consecutiveWeekCount(completedWeeks);
   return {
     name: data.user?.displayName ?? stringValue(row, 'name'),
     firstName: data.user?.firstName ?? stringValue(row, 'first_name'),
     goal: data.user?.goal ?? stringValue(row, 'goal'),
     weightKg: data.user?.weightKg ?? numberValue(row, 'weight_kg'),
     heightM: data.user?.heightM ?? numberValue(row, 'height_m'),
-    totalSessions: numberValue(row, 'total_sessions'),
-    streakWeeks: numberValue(row, 'streak_weeks'),
+    totalSessions: totalSessions || numberValue(row, 'total_sessions'),
+    streakWeeks: streakWeeks || numberValue(row, 'streak_weeks'),
   };
 }
 
@@ -109,16 +136,33 @@ const toExercise = (row: Row): Exercise => {
   const lastDate = stringValue(row, 'last_date');
   const lastLoad = nullableNumber(row, 'last_load');
   const lastReps = stringValue(row, 'last_reps');
+  const catalogFocus = stringValue(row, 'catalog_focus');
+  const catalogMuscleGroups = stringArrayValue(row, 'catalog_muscle_groups');
+  const catalogSteps = stringArrayValue(row, 'catalog_instruction_steps');
   return {
     id: stringValue(row, 'id'),
+    catalogId: stringValue(row, 'catalog_id') || undefined,
     name: stringValue(row, 'name'),
     scheme: stringValue(row, 'scheme'),
     suggested: numberValue(row, 'suggested'),
     sets: numberValue(row, 'sets'),
     work: numberValue(row, 'work'),
     rest: numberValue(row, 'rest'),
-    focus: stringValue(row, 'focus'),
-    muscleGroups: resolveMuscleGroups(stringValue(row, 'name'), stringValue(row, 'focus'), row?.muscle_groups),
+    focus: catalogFocus || stringValue(row, 'focus'),
+    muscleGroups: resolveMuscleGroups(
+      stringValue(row, 'name'),
+      catalogFocus || stringValue(row, 'focus'),
+      catalogMuscleGroups.length ? catalogMuscleGroups : row?.muscle_groups,
+    ),
+    nameEn: stringValue(row, 'catalog_name_en') || undefined,
+    equipment: stringValue(row, 'catalog_equipment') || undefined,
+    target: stringValue(row, 'catalog_target') || undefined,
+    secondaryMuscles: stringArrayValue(row, 'catalog_secondary_muscles'),
+    instructions: stringValue(row, 'catalog_instructions') || undefined,
+    instructionSteps: catalogSteps.length ? catalogSteps : undefined,
+    imageUrl: stringValue(row, 'catalog_image_url') || undefined,
+    gifUrl: stringValue(row, 'catalog_gif_url') || undefined,
+    attribution: stringValue(row, 'catalog_attribution') || undefined,
     cues: stringValue(row, 'cues'),
     overload: nullableNumber(row, 'overload'),
     loadSource: stringValue(row, 'load_source') === 'ai' ? 'ai' : 'coach',
@@ -142,8 +186,45 @@ const toExercise = (row: Row): Exercise => {
   };
 };
 
+const toCatalogExercise = (row: Row): Exercise => {
+  const name = stringValue(row, 'name_es', stringValue(row, 'name_en'));
+  const equipment = stringValue(row, 'equipment_es', stringValue(row, 'equipment_en'));
+  const steps = stringArrayValue(row, 'instruction_steps_es');
+  return {
+    id: stringValue(row, 'id'),
+    name,
+    nameEn: stringValue(row, 'name_en'),
+    scheme: '3 × 8',
+    suggested: 0,
+    sets: 3,
+    work: 30,
+    rest: 90,
+    focus: stringValue(row, 'body_part_es', stringValue(row, 'category_es')),
+    equipment,
+    target: stringValue(row, 'target_es', stringValue(row, 'target_en')),
+    secondaryMuscles: stringArrayValue(row, 'secondary_muscles_es'),
+    instructions: stringValue(row, 'instructions_es'),
+    instructionSteps: steps,
+    imageUrl: stringValue(row, 'image_url') || undefined,
+    gifUrl: stringValue(row, 'gif_url') || undefined,
+    attribution: stringValue(row, 'attribution') || undefined,
+    muscleGroups: resolveMuscleGroups(name, stringValue(row, 'focus'), row?.muscle_groups),
+    cues: steps.join('\n') || stringValue(row, 'instructions_es'),
+    overload: null,
+    loadSource: 'coach',
+    loadReason: 'Ejercicio de la biblioteca.',
+    progressionMetric: /peso corporal|body weight/i.test(equipment) ? 'reps' : 'load',
+    targetReps: 8,
+  };
+};
+
 export function getExercises(data: RemoteData): Exercise[] {
-  return rows(data, 'exercise').map(toExercise);
+  const catalog = rows(data, 'exercise_catalog');
+  return catalog.length ? catalog.map(toCatalogExercise).sort((a, b) => a.name.localeCompare(b.name)) : rows(data, 'exercise').map(toExercise);
+}
+
+export function getCatalogExercises(data: RemoteData): Exercise[] {
+  return getExercises(data);
 }
 
 function exerciseKey(name: string): string {
@@ -153,6 +234,29 @@ function exerciseKey(name: string): string {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+function catalogAliases(name: string): string[] {
+  const key = exerciseKey(name);
+  const aliases: Record<string, string[]> = {
+    'press de pecho': ['bench press', 'chest press'],
+    'remo sentado': ['seated row', 'cable row'],
+    'sentadilla goblet': ['goblet squat'],
+    'sentadilla con barra smith': ['smith full squat'],
+    'peso muerto rumano': ['romanian deadlift'],
+    plancha: ['plank'],
+  };
+  return aliases[key] ?? [];
+}
+
+function findCatalogMatch(catalog: Exercise[], exercise: Exercise): Exercise | undefined {
+  const aliases = catalogAliases(exercise.name);
+  return catalog.find(
+    (item) =>
+      exerciseKey(item.name) === exerciseKey(exercise.name) ||
+      item.nameEn === exercise.name ||
+      aliases.some((alias) => exerciseKey(item.nameEn ?? '').includes(exerciseKey(alias))),
+  );
 }
 
 function resolveMuscleGroups(name: string, focus: string, storedGroups: unknown): string[] {
@@ -181,7 +285,40 @@ function primaryMuscleKey(group: string): string {
 }
 
 function dateOnly(value: string): string {
-  return value.slice(0, 10);
+  if (!value) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value.slice(0, 10);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Asuncion',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function weekStartFromDate(value: string): string {
+  if (!value) return '';
+  const date = new Date(`${value}T00:00:00Z`);
+  const day = date.getUTCDay();
+  date.setUTCDate(date.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  return date.toISOString().slice(0, 10);
+}
+
+function consecutiveWeekCount(weeks: Set<string>): number {
+  if (!weeks.size) return 0;
+  const ordered = [...weeks].filter(Boolean).sort().reverse();
+  let count = 1;
+  for (let index = 1; index < ordered.length; index += 1) {
+    const previous = new Date(`${ordered[index - 1]}T00:00:00Z`);
+    const current = new Date(`${ordered[index]}T00:00:00Z`);
+    const difference = Math.round((previous.getTime() - current.getTime()) / 86400000);
+    if (difference !== 7) break;
+    count += 1;
+  }
+  return count;
 }
 
 function progressRank(routine: Row, exercise: Row): string {
@@ -260,9 +397,12 @@ function rangeStart(range: AthleteProgressRange, now = new Date()): string | nul
 
 function targetReps(row: Row | undefined): number {
   const explicit = numberValue(row, 'target_reps');
-  if (explicit > 0) return explicit;
   const numbers = stringValue(row, 'scheme').match(/\d+/g) ?? [];
-  return Number(numbers[numbers.length - 1]) || 0;
+  // For a range such as 8-10, reaching the minimum (8) is a valid target.
+  // Older snapshots stored the upper bound in target_reps, so prefer the
+  // lower bound whenever the scheme explicitly contains a range.
+  if (numbers.length >= 2 && /\d+\s*[-–]\s*\d+/.test(stringValue(row, 'scheme'))) return Number(numbers[0]) || explicit;
+  return explicit > 0 ? explicit : Number(numbers[0]) || 0;
 }
 
 function progressionMetric(row: Row | undefined): 'load' | 'reps' | 'seconds' {
@@ -373,7 +513,27 @@ export function getAthleteExerciseProgress(
 
 export function getExercise(data: RemoteData, id: string): Exercise | null {
   const row = rows(data, 'exercise').find((item) => item.id === id);
-  return row ? toExercise(row) : null;
+  if (row) {
+    const exercise = toExercise(row);
+    const catalog = findCatalogMatch(getCatalogExercises(data), exercise);
+    return catalog
+      ? {
+          ...exercise,
+          nameEn: catalog.nameEn,
+          equipment: catalog.equipment,
+          target: catalog.target,
+          secondaryMuscles: catalog.secondaryMuscles,
+          instructions: catalog.instructions,
+          instructionSteps: catalog.instructionSteps,
+          imageUrl: catalog.imageUrl,
+          gifUrl: catalog.gifUrl,
+          attribution: catalog.attribution,
+          muscleGroups: exercise.muscleGroups.length ? exercise.muscleGroups : catalog.muscleGroups,
+        }
+      : exercise;
+  }
+  const catalogRow = rows(data, 'exercise_catalog').find((item) => item.id === id);
+  return catalogRow ? toCatalogExercise(catalogRow) : null;
 }
 
 export function getTodayRoutine(data: RemoteData): Routine {
@@ -625,6 +785,42 @@ export function getClientLastSession(data: RemoteData, athleteId: string): strin
 }
 
 export function getHistory(data: RemoteData): SessionRecord[] {
+  if (data.user?.role === 'athlete') {
+    const athleteId = data.user.id;
+    const exerciseById = new Map(rows(data, 'exercise').map((row) => [stringValue(row, 'id'), row]));
+    return rows(data, 'routine')
+      .filter(
+        (routine) =>
+          stringValue(routine, 'athlete_id') === athleteId &&
+          Boolean(stringValue(routine, 'completed_at')),
+      )
+      .sort((a, b) => stringValue(b, 'completed_at').localeCompare(stringValue(a, 'completed_at')))
+      .map((routine) => {
+        const routineId = stringValue(routine, 'id');
+        const links = rows(data, 'routine_exercise').filter((link) => stringValue(link, 'routine_id') === routineId);
+        const logs = rows(data, 'set_log').filter((log) => stringValue(log, 'routine_id') === routineId);
+        const plannedSets = links.reduce(
+          (total, link) => total + numberValue(exerciseById.get(stringValue(link, 'exercise_id')), 'sets'),
+          0,
+        );
+        const volume = logs.reduce(
+          (total, log) => total + (nullableNumber(log, 'load') ?? 0) * numberValue(log, 'reps'),
+          0,
+        );
+        const date = dateOnly(stringValue(routine, 'completed_at'));
+        return {
+          id: routineId,
+          date: new Date(`${date}T12:00:00`),
+          name: stringValue(routine, 'name'),
+          minutes: numberValue(routine, 'estimated_minutes'),
+          sets: plannedSets,
+          volume,
+          // A completed routine is a completed session; it is not a target score.
+          completion: 100,
+        };
+      });
+  }
+
   return [...rows(data, 'session')]
     .sort((a, b) => stringValue(b, 'date').localeCompare(stringValue(a, 'date')))
     .map((row) => ({
@@ -639,10 +835,11 @@ export function getHistory(data: RemoteData): SessionRecord[] {
 }
 
 export function getHistorySummary(data: RemoteData) {
+  const history = getHistory(data);
   return {
-    sessions: getMetaNumber(data, 'history_sessions'),
-    totalMinutes: getMetaNumber(data, 'history_minutes'),
-    completion: getMetaNumber(data, 'history_completion'),
+    sessions: history.length || getMetaNumber(data, 'history_sessions'),
+    totalMinutes: history.reduce((total, session) => total + session.minutes, 0) || getMetaNumber(data, 'history_minutes'),
+    completion: history.length ? 100 : getMetaNumber(data, 'history_completion'),
   };
 }
 

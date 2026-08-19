@@ -18,6 +18,25 @@ const adminClerkUserId = process.env.ADMIN_CLERK_USER_ID?.trim() ?? '';
 const ephemeralTestEnabled = process.env.ENABLE_EPHEMERAL_TEST_ACCOUNT === 'true';
 const ephemeralTestEmail = process.env.EPHEMERAL_TEST_EMAIL?.trim().toLowerCase() ?? '';
 const ephemeralTestPassword = process.env.EPHEMERAL_TEST_PASSWORD ?? '';
+const expectedExerciseCatalogSize = 1324;
+const exerciseCatalogRequiredFields = [
+  'id',
+  'name_en',
+  'name_es',
+  'category_en',
+  'category_es',
+  'body_part_en',
+  'body_part_es',
+  'equipment_en',
+  'equipment_es',
+  'target_en',
+  'target_es',
+  'muscle_group_en',
+  'muscle_group_es',
+  'instructions_es',
+  'image_url',
+  'gif_url',
+];
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 if (!clerkSecretKey) throw new Error('CLERK_SECRET_KEY is required');
@@ -77,6 +96,131 @@ function quoteIdentifier(identifier) {
 async function initializeDatabase() {
   const schema = await readFile(new URL('../db/schema.sql', import.meta.url), 'utf8');
   await pool.query(schema);
+  await ensureExerciseCatalog();
+  await normalizeLegacyExerciseTargets();
+}
+
+async function normalizeLegacyExerciseTargets() {
+  // Older snapshots used the upper bound for ranges such as 8-10. The
+  // minimum of the range is the valid completion target used by the athlete
+  // and by the progression engine.
+  await pool.query(`
+    UPDATE exercise
+       SET target_reps = (regexp_match(scheme, '([0-9]+)[[:space:]]*[-–][[:space:]]*[0-9]+'))[1]::integer
+     WHERE scheme ~ '[0-9]+[[:space:]]*[-–][[:space:]]*[0-9]+'
+       AND target_reps <> (regexp_match(scheme, '([0-9]+)[[:space:]]*[-–][[:space:]]*[0-9]+'))[1]::integer
+  `);
+}
+
+async function ensureExerciseCatalog() {
+  let catalog;
+  try {
+    catalog = JSON.parse(await readFile(new URL('../db/exercise-catalog.json', import.meta.url), 'utf8'));
+  } catch (error) {
+    throw new Error(`Exercise catalog data file is unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!Array.isArray(catalog) || catalog.length !== expectedExerciseCatalogSize) {
+    throw new Error(
+      `Exercise catalog must contain exactly ${expectedExerciseCatalogSize} records; received ${Array.isArray(catalog) ? catalog.length : 'invalid data'}`,
+    );
+  }
+
+  const ids = new Set();
+  for (const [index, item] of catalog.entries()) {
+    if (!item || typeof item !== 'object') {
+      throw new Error(`Exercise catalog record ${index} is invalid`);
+    }
+    for (const field of exerciseCatalogRequiredFields) {
+      if (typeof item[field] !== 'string' || !item[field].trim()) {
+        throw new Error(`Exercise catalog record ${index} is missing ${field}`);
+      }
+    }
+    if (ids.has(item.id)) throw new Error(`Exercise catalog contains duplicate id ${item.id}`);
+    ids.add(item.id);
+    if (!Array.isArray(item.secondary_muscles_en) || !Array.isArray(item.secondary_muscles_es)) {
+      throw new Error(`Exercise catalog record ${index} has invalid secondary muscles`);
+    }
+    if (!Array.isArray(item.muscle_groups) || !Array.isArray(item.instruction_steps_es)) {
+      throw new Error(`Exercise catalog record ${index} has invalid exercise metadata arrays`);
+    }
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM exercise_catalog');
+    await client.query(
+      `INSERT INTO exercise_catalog (
+       id, name_en, name_es, category_en, category_es, body_part_en, body_part_es,
+       equipment_en, equipment_es, target_en, target_es, muscle_group_en, muscle_group_es,
+       secondary_muscles_en, secondary_muscles_es, muscle_groups, instructions_es,
+       instruction_steps_es, image_url, gif_url, attribution, source, updated_at
+     )
+     SELECT
+       item.id, item.name_en, item.name_es, item.category_en, item.category_es,
+       item.body_part_en, item.body_part_es, item.equipment_en, item.equipment_es,
+       item.target_en, item.target_es, item.muscle_group_en, item.muscle_group_es,
+       item.secondary_muscles_en, item.secondary_muscles_es, item.muscle_groups,
+       item.instructions_es, item.instruction_steps_es, item.image_url, item.gif_url,
+       item.attribution, item.source, NOW()
+     FROM jsonb_to_recordset($1::jsonb) AS item(
+       id TEXT,
+       name_en TEXT,
+       name_es TEXT,
+       category_en TEXT,
+       category_es TEXT,
+       body_part_en TEXT,
+       body_part_es TEXT,
+       equipment_en TEXT,
+       equipment_es TEXT,
+       target_en TEXT,
+       target_es TEXT,
+       muscle_group_en TEXT,
+       muscle_group_es TEXT,
+       secondary_muscles_en TEXT[],
+       secondary_muscles_es TEXT[],
+       muscle_groups TEXT[],
+       instructions_es TEXT,
+       instruction_steps_es TEXT[],
+       image_url TEXT,
+       gif_url TEXT,
+       attribution TEXT,
+       source TEXT
+     )
+     ON CONFLICT (id) DO UPDATE SET
+       name_en = EXCLUDED.name_en,
+       name_es = EXCLUDED.name_es,
+       category_en = EXCLUDED.category_en,
+       category_es = EXCLUDED.category_es,
+       body_part_en = EXCLUDED.body_part_en,
+       body_part_es = EXCLUDED.body_part_es,
+       equipment_en = EXCLUDED.equipment_en,
+       equipment_es = EXCLUDED.equipment_es,
+       target_en = EXCLUDED.target_en,
+       target_es = EXCLUDED.target_es,
+       muscle_group_en = EXCLUDED.muscle_group_en,
+       muscle_group_es = EXCLUDED.muscle_group_es,
+       secondary_muscles_en = EXCLUDED.secondary_muscles_en,
+       secondary_muscles_es = EXCLUDED.secondary_muscles_es,
+       muscle_groups = EXCLUDED.muscle_groups,
+       instructions_es = EXCLUDED.instructions_es,
+       instruction_steps_es = EXCLUDED.instruction_steps_es,
+       image_url = EXCLUDED.image_url,
+       gif_url = EXCLUDED.gif_url,
+       attribution = EXCLUDED.attribution,
+       source = EXCLUDED.source,
+       updated_at = NOW()`,
+      [JSON.stringify(catalog)],
+    );
+    await client.query('COMMIT');
+    app.log.info({ count: catalog.length }, 'Exercise catalog replaced');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function authenticate(request, reply) {
@@ -134,6 +278,100 @@ async function ensureUser(userId) {
   return result.rows[0];
 }
 
+const catalogAliasMap = {
+  'press de pecho': ['bench press', 'chest press'],
+  'remo sentado': ['seated row', 'cable row'],
+  'sentadilla goblet': ['goblet squat'],
+  'sentadilla con barra smith': ['smith full squat'],
+  'peso muerto rumano': ['romanian deadlift'],
+  plancha: ['plank'],
+};
+
+function findCatalogMatchByName(catalogRows, name) {
+  const normalized = normalizeName(name);
+  if (!normalized) return null;
+  const exact = catalogRows.find(
+    (row) => normalizeName(row.name_es) === normalized || normalizeName(row.name_en) === normalized,
+  );
+  if (exact) return exact;
+
+  const aliases = catalogAliasMap[normalized] ?? [];
+  const aliasMatches = catalogRows.filter((row) =>
+    aliases.some((alias) => {
+      const normalizedAlias = normalizeName(alias);
+      const nameEn = normalizeName(row.name_en);
+      const nameEs = normalizeName(row.name_es);
+      return nameEn === normalizedAlias || nameEs === normalizedAlias || nameEn.includes(normalizedAlias);
+    }),
+  );
+  return aliasMatches.length === 1 ? aliasMatches[0] : null;
+}
+
+async function resolveImportedCatalogExercises(queryable, days) {
+  const result = await queryable.query(
+    `SELECT id, name_en, name_es, body_part_es, equipment_es, target_es,
+            secondary_muscles_es, muscle_groups, instructions_es,
+            instruction_steps_es, image_url, gif_url, attribution
+       FROM exercise_catalog`,
+  );
+  if (!result.rows.length) return days;
+
+  return days.map((day) => ({
+    ...day,
+    exercises: day.exercises.map((exercise) => {
+      const catalog = findCatalogMatchByName(result.rows, exercise.name);
+      if (!catalog) return { ...exercise, catalogMatched: false };
+      return {
+        ...exercise,
+        name: catalog.name_es,
+        catalogId: catalog.id,
+        catalogName: catalog.name_es,
+        catalogFocus: catalog.body_part_es,
+        catalogMatched: true,
+      };
+    }),
+  }));
+}
+
+async function enrichBootstrapExercises(exercises) {
+  if (!exercises.length) return exercises;
+  const result = await pool.query(
+    `SELECT id, name_en, name_es, body_part_es, equipment_es, target_es,
+            secondary_muscles_es, muscle_groups, instructions_es,
+            instruction_steps_es, image_url, gif_url, attribution
+       FROM exercise_catalog`,
+  );
+  if (!result.rows.length) return exercises;
+
+  return exercises.map((exercise) => {
+    const catalog = findCatalogMatchByName(result.rows, exercise.name);
+    if (!catalog) return exercise;
+    return {
+      ...exercise,
+      catalog_id: catalog.id,
+      catalog_name_en: catalog.name_en,
+      catalog_name_es: catalog.name_es,
+      catalog_focus: catalog.body_part_es,
+      catalog_equipment: catalog.equipment_es,
+      catalog_target: catalog.target_es,
+      catalog_secondary_muscles: catalog.secondary_muscles_es,
+      catalog_muscle_groups: catalog.muscle_groups,
+      catalog_instructions: catalog.instructions_es,
+      catalog_instruction_steps: catalog.instruction_steps_es,
+      catalog_image_url: catalog.image_url,
+      catalog_gif_url: catalog.gif_url,
+      catalog_attribution: catalog.attribution,
+    };
+  });
+}
+
+async function requireCatalogAccess(request, reply) {
+  const profile = await ensureUser(request.userId);
+  if (profile.role === 'coach' || (profile.role === 'athlete' && profile.solo_training)) return profile;
+  reply.code(403).send({ error: 'Esta biblioteca sólo está disponible para entrenadores y atletas independientes' });
+  return null;
+}
+
 async function readBootstrap(userId) {
   const user = await ensureUser(userId);
   const tables = {};
@@ -172,7 +410,7 @@ async function readBootstrap(userId) {
              ORDER BY t.position`,
           )
         : await pool.query(`SELECT * FROM ${quoteIdentifier(table)} ORDER BY ${orderBy[table] ?? '1'}`);
-    tables[table] = result.rows;
+    tables[table] = table === 'exercise' ? await enrichBootstrapExercises(result.rows) : result.rows;
   }
 
   return {
@@ -203,12 +441,122 @@ app.get('/v1/bootstrap', { preHandler: authenticate }, async (request) => {
   return readBootstrap(request.userId);
 });
 
+app.get('/v1/exercise-catalog/muscles', { preHandler: authenticate }, async (request, reply) => {
+  if (!(await requireCatalogAccess(request, reply))) return;
+  const result = await pool.query(
+    `SELECT body_part_es AS label, COUNT(*)::int AS count
+       FROM exercise_catalog
+      WHERE body_part_es IS NOT NULL AND body_part_es <> ''
+      GROUP BY body_part_es
+      ORDER BY body_part_es`,
+  );
+  return {
+    items: result.rows.map((row) => ({
+      key: normalizeName(row.label),
+      label: row.label,
+      count: Number(row.count) || 0,
+    })),
+  };
+});
+
+app.get('/v1/exercise-catalog', { preHandler: authenticate }, async (request, reply) => {
+  if (!(await requireCatalogAccess(request, reply))) return;
+  const query = request.query ?? {};
+  const muscleKey = normalizeName(textValue(query.muscle));
+  const search = textValue(query.search);
+  const page = normalizedInteger(query.page, 1, 1, 100000);
+  const limit = normalizedInteger(query.limit, 24, 1, 50);
+  if (!muscleKey) return reply.code(400).send({ error: 'Elegí un músculo antes de consultar el catálogo' });
+
+  const muscleResult = await pool.query(
+    `SELECT DISTINCT body_part_es AS label
+       FROM exercise_catalog
+      WHERE body_part_es IS NOT NULL AND body_part_es <> ''`,
+  );
+  const muscle = muscleResult.rows.find((row) => normalizeName(row.label) === muscleKey)?.label;
+  if (!muscle) return reply.code(400).send({ error: 'El músculo solicitado no existe en el catálogo' });
+
+  const values = [muscle];
+  const filters = ['body_part_es = $1'];
+  if (search) {
+    values.push(`%${search}%`);
+    filters.push('(name_es ILIKE $2 OR name_en ILIKE $2 OR equipment_es ILIKE $2 OR target_es ILIKE $2)');
+  }
+  const where = filters.join(' AND ');
+  const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM exercise_catalog WHERE ${where}`, values);
+  const total = Number(countResult.rows[0]?.total) || 0;
+  const offset = (page - 1) * limit;
+  const rowsResult = await pool.query(
+    `SELECT id, name_es AS name, body_part_es AS focus, equipment_es AS equipment,
+            target_es AS target, image_url, gif_url, muscle_groups
+       FROM exercise_catalog
+      WHERE ${where}
+      ORDER BY name_es, id
+      LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+    [...values, limit, offset],
+  );
+
+  return {
+    items: rowsResult.rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      focus: row.focus,
+      equipment: row.equipment,
+      target: row.target,
+      imageUrl: row.image_url,
+      gifUrl: row.gif_url,
+      muscleGroups: Array.isArray(row.muscle_groups) ? row.muscle_groups : [],
+    })),
+    page,
+    limit,
+    total,
+    hasMore: offset + rowsResult.rows.length < total,
+  };
+});
+
+app.get('/v1/exercise-catalog/item/:id', { preHandler: authenticate }, async (request, reply) => {
+  if (!(await requireCatalogAccess(request, reply))) return;
+  const id = textValue(request.params?.id);
+  const result = await pool.query('SELECT * FROM exercise_catalog WHERE id = $1 LIMIT 1', [id]);
+  const row = result.rows[0];
+  if (!row) return reply.code(404).send({ error: 'No encontramos ese ejercicio en el catálogo' });
+  return {
+    id: row.id,
+    name: row.name_es,
+    nameEn: row.name_en,
+    focus: row.body_part_es,
+    equipment: row.equipment_es,
+    target: row.target_es,
+    secondaryMuscles: row.secondary_muscles_es ?? [],
+    muscleGroups: row.muscle_groups ?? [],
+    instructions: row.instructions_es,
+    instructionSteps: row.instruction_steps_es ?? [],
+    imageUrl: row.image_url,
+    gifUrl: row.gif_url,
+    attribution: row.attribution,
+  };
+});
+
 function isoDateValue(date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
 }
 
 function databaseDateValue(value) {
-  return value instanceof Date ? isoDateValue(value) : String(value ?? '').slice(0, 10);
+  const text = String(value ?? '');
+  if (value instanceof Date || /\d{4}-\d{2}-\d{2}[T ]/.test(text)) {
+    const date = value instanceof Date ? value : new Date(text);
+    if (!Number.isNaN(date.getTime())) {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Asuncion',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(date);
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return `${values.year}-${values.month}-${values.day}`;
+    }
+  }
+  return text.slice(0, 10);
 }
 
 function validIsoDate(value) {
@@ -328,7 +676,7 @@ const coachScopedRoutines = `
         WHEN r.week_start IS NOT NULL
         THEN (r.week_start + ((r.day - 1) * INTERVAL '1 day'))::date
       END,
-      r.completed_at::date
+      (r.completed_at AT TIME ZONE 'America/Asuncion')::date
     ) AS scheduled_date
   FROM routine r
   JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
@@ -369,13 +717,13 @@ async function fetchCoachHistory({ clientId, from, to, limit, offset }) {
         SELECT COUNT(*)::integer AS total
         FROM scoped_routines
         WHERE completed_at IS NOT NULL
-          AND completed_at::date BETWEEN $2::date AND $3::date
+          AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
       )
       SELECT
         sr.id,
         sr.client_id,
         sr.client_name,
-        COALESCE(sr.completed_at::date, sr.scheduled_date) AS training_date,
+        COALESCE((sr.completed_at AT TIME ZONE 'America/Asuncion')::date, sr.scheduled_date) AS training_date,
         sr.name,
         sr.estimated_minutes AS minutes,
         COALESCE(rs.sets, 0) AS sets,
@@ -387,8 +735,8 @@ async function fetchCoachHistory({ clientId, from, to, limit, offset }) {
       LEFT JOIN routine_sets rs ON rs.routine_id = sr.id
       LEFT JOIN routine_volume rv ON rv.routine_id = sr.id
       WHERE sr.completed_at IS NOT NULL
-        AND sr.completed_at::date BETWEEN $2::date AND $3::date
-      ORDER BY COALESCE(sr.completed_at::date, sr.scheduled_date) DESC, sr.id DESC
+        AND (sr.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+      ORDER BY COALESCE((sr.completed_at AT TIME ZONE 'America/Asuncion')::date, sr.scheduled_date) DESC, sr.id DESC
       LIMIT $4 OFFSET $5`,
     [clientId, from, to, limit, offset],
   );
@@ -459,7 +807,7 @@ async function fetchCoachHistoryDetail(routineId) {
         loadSource: row.load_source === 'ai' ? 'ai' : 'coach',
         loadReason: row.load_reason ?? '',
         progressionMetric: row.progression_metric === 'seconds' ? 'seconds' : row.progression_metric === 'reps' ? 'reps' : 'load',
-        targetReps: Number(row.target_reps) || 0,
+        targetReps: targetValueFromExercise(row.target_reps, row.scheme),
         sets: [],
       };
       byId.set(row.exercise_id, exercise);
@@ -540,13 +888,13 @@ function repsFromScheme(scheme) {
 async function fetchCoachActivity({ clientId, from, to }) {
   const result = await pool.query(
     `SELECT
-       date_trunc('week', completed_at)::date AS week_start,
+       date_trunc('week', completed_at AT TIME ZONE 'America/Asuncion')::date AS week_start,
        COUNT(*)::integer AS sessions,
        COALESCE(SUM(estimated_minutes), 0)::integer AS minutes
      FROM (${coachScopedRoutines}) scoped_routines
      WHERE completed_at IS NOT NULL
-       AND completed_at::date BETWEEN $2::date AND $3::date
-     GROUP BY date_trunc('week', completed_at)::date
+       AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+     GROUP BY date_trunc('week', completed_at AT TIME ZONE 'America/Asuncion')::date
      ORDER BY week_start`,
     [clientId, from, to],
   );
@@ -580,13 +928,13 @@ async function fetchCoachHeatmap({ clientId, from, to }) {
       ),
       completed AS (
         SELECT
-          completed_at::date AS date,
+          (completed_at AT TIME ZONE 'America/Asuncion')::date AS date,
           COUNT(*)::integer AS sessions,
           COALESCE(SUM(estimated_minutes), 0)::integer AS minutes
         FROM (${coachScopedRoutines}) scoped_routines
         WHERE completed_at IS NOT NULL
-          AND completed_at::date BETWEEN $2::date AND $3::date
-        GROUP BY completed_at::date
+          AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+        GROUP BY (completed_at AT TIME ZONE 'America/Asuncion')::date
       )
       SELECT
         days.date,
@@ -619,13 +967,13 @@ function rangeWeekdayOccurrences(from, to) {
 async function fetchCoachWeekdayActivity({ clientId, from, to }) {
   const result = await pool.query(
     `SELECT
-       EXTRACT(ISODOW FROM completed_at::date)::integer AS weekday,
+       EXTRACT(ISODOW FROM (completed_at AT TIME ZONE 'America/Asuncion'))::integer AS weekday,
        COUNT(*)::integer AS sessions,
-       COUNT(DISTINCT date_trunc('week', completed_at)::date)::integer AS active_weeks
+       COUNT(DISTINCT date_trunc('week', completed_at AT TIME ZONE 'America/Asuncion')::date)::integer AS active_weeks
      FROM (${coachScopedRoutines}) scoped_routines
      WHERE completed_at IS NOT NULL
-       AND completed_at::date BETWEEN $2::date AND $3::date
-     GROUP BY EXTRACT(ISODOW FROM completed_at::date)
+       AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+     GROUP BY EXTRACT(ISODOW FROM (completed_at AT TIME ZONE 'America/Asuncion'))
      ORDER BY weekday`,
     [clientId, from, to],
   );
@@ -706,7 +1054,7 @@ async function fetchCoachMuscleBalance({ clientId, from, to }) {
   const result = await pool.query(
     `SELECT
        r.id AS routine_id,
-       r.completed_at::date AS training_date,
+       (r.completed_at AT TIME ZONE 'America/Asuncion')::date AS training_date,
        re.exercise_id,
        e.name,
        e.focus,
@@ -721,8 +1069,8 @@ async function fetchCoachMuscleBalance({ clientId, from, to }) {
       AND sl.exercise_id = re.exercise_id
      WHERE ($1::text IS NULL OR c.id = $1)
        AND r.completed_at IS NOT NULL
-       AND r.completed_at::date BETWEEN $2::date AND $3::date
-     ORDER BY r.completed_at::date, r.id, re.position`,
+       AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+     ORDER BY (r.completed_at AT TIME ZONE 'America/Asuncion')::date, r.id, re.position`,
     [clientId, from, to],
   );
 
@@ -814,7 +1162,7 @@ async function fetchCoachExerciseLibrary({ clientId, from, to }) {
     `SELECT
        e.name,
        COUNT(DISTINCT r.id)::integer AS sessions,
-       MAX(r.completed_at::date) AS last_date,
+       MAX((r.completed_at AT TIME ZONE 'America/Asuncion')::date) AS last_date,
        ((ARRAY_AGG(sl.load ORDER BY sl.logged_at DESC) FILTER (WHERE sl.load IS NOT NULL)))[1] AS last_load,
        (ARRAY_AGG(sl.reps ORDER BY sl.logged_at DESC))[1] AS last_reps,
        ARRAY_AGG(DISTINCT r.id) AS session_ids
@@ -824,9 +1172,9 @@ async function fetchCoachExerciseLibrary({ clientId, from, to }) {
      JOIN exercise e ON e.id = sl.exercise_id
      WHERE c.id = $1
        AND r.completed_at IS NOT NULL
-       AND r.completed_at::date BETWEEN $2::date AND $3::date
+       AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
      GROUP BY e.id, e.name
-     ORDER BY MAX(r.completed_at::date) DESC, e.name`,
+     ORDER BY MAX((r.completed_at AT TIME ZONE 'America/Asuncion')::date) DESC, e.name`,
     [clientId, from, to],
   );
 
@@ -869,7 +1217,7 @@ async function findCoachExerciseRows({ clientId, exerciseKey, from, to }) {
     `SELECT
        e.name,
        e.scheme,
-       r.completed_at::date AS training_date,
+       (r.completed_at AT TIME ZONE 'America/Asuncion')::date AS training_date,
        sl.load,
        sl.reps
      FROM set_log sl
@@ -878,8 +1226,8 @@ async function findCoachExerciseRows({ clientId, exerciseKey, from, to }) {
      JOIN exercise e ON e.id = sl.exercise_id
      WHERE c.id = $1
        AND r.completed_at IS NOT NULL
-       AND r.completed_at::date BETWEEN $2::date AND $3::date
-     ORDER BY r.completed_at::date, sl.logged_at`,
+       AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+     ORDER BY (r.completed_at AT TIME ZONE 'America/Asuncion')::date, sl.logged_at`,
     [clientId, from, to],
   );
   return result.rows.filter((row) => normalizeName(row.name) === exerciseKey);
@@ -970,9 +1318,9 @@ async function fetchCoachStatistics({ clientId, from, to }) {
       `WITH scoped_routines AS (${coachScopedRoutines})
        SELECT
          COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date)::integer AS scheduled,
-         COUNT(*) FILTER (WHERE completed_at IS NOT NULL AND completed_at::date BETWEEN $2::date AND $3::date)::integer AS completed,
-         COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date AND completed_at IS NOT NULL AND completed_at::date BETWEEN $2::date AND $3::date)::integer AS completed_scheduled,
-         COALESCE(SUM(CASE WHEN completed_at IS NOT NULL AND completed_at::date BETWEEN $2::date AND $3::date THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
+         COUNT(*) FILTER (WHERE completed_at IS NOT NULL AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date)::integer AS completed,
+         COUNT(*) FILTER (WHERE scheduled_date BETWEEN $2::date AND $3::date AND completed_at IS NOT NULL AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date)::integer AS completed_scheduled,
+         COALESCE(SUM(CASE WHEN completed_at IS NOT NULL AND (completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date THEN estimated_minutes ELSE 0 END), 0)::integer AS minutes
        FROM scoped_routines`,
       [clientId, from, to],
     ),
@@ -983,20 +1331,20 @@ async function fetchCoachStatistics({ clientId, from, to }) {
        JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
        WHERE ($1::text IS NULL OR c.id = $1)
          AND r.completed_at IS NOT NULL
-         AND r.completed_at::date BETWEEN $2::date AND $3::date`,
+         AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date`,
       [clientId, from, to],
     ),
     pool.query(
       `SELECT
-         date_trunc('week', r.completed_at)::date AS week_start,
+         date_trunc('week', r.completed_at AT TIME ZONE 'America/Asuncion')::date AS week_start,
          SUM(COALESCE(sl.load, 0) * sl.reps)::double precision AS volume_kg
        FROM set_log sl
        JOIN routine r ON r.id = sl.routine_id
        JOIN client c ON r.athlete_id = COALESCE(c.clerk_user_id, c.id)
        WHERE ($1::text IS NULL OR c.id = $1)
          AND r.completed_at IS NOT NULL
-         AND r.completed_at::date BETWEEN $2::date AND $3::date
-       GROUP BY date_trunc('week', r.completed_at)::date
+         AND (r.completed_at AT TIME ZONE 'America/Asuncion')::date BETWEEN $2::date AND $3::date
+       GROUP BY date_trunc('week', r.completed_at AT TIME ZONE 'America/Asuncion')::date
        ORDER BY week_start`,
       [clientId, from, to],
     ),
@@ -1408,7 +1756,15 @@ function roundLoad(value) {
 
 function targetValueFromReps(value, fallback = 8) {
   const numbers = String(value ?? '').match(/\d+/g)?.map(Number).filter(Number.isFinite) ?? [];
-  return numbers.length ? numbers[numbers.length - 1] : fallback;
+  // In a range such as 8-10, reaching the minimum (8) completes the target.
+  return numbers.length ? numbers[0] : fallback;
+}
+
+function targetValueFromExercise(explicit, scheme) {
+  const text = String(scheme ?? '');
+  const range = text.match(/(\d+)\s*[-–]\s*(\d+)/);
+  if (range) return Number(range[1]) || targetValueFromReps(text);
+  return Number(explicit) || targetValueFromReps(text);
 }
 
 function isBodyweightName(name) {
@@ -1460,7 +1816,7 @@ async function findLatestCompletedPerformance(client, athleteId, exerciseName) {
         completedAt: row.completed_at,
         sets: Number(row.sets) || 1,
         scheme: row.scheme ?? '',
-        targetReps: Number(row.target_reps) || targetValueFromReps(row.scheme),
+        targetReps: targetValueFromExercise(row.target_reps, row.scheme),
         metric: progressionMetricFor(row.name, row.scheme, row.load, row.progression_metric),
         logs: [],
       };
@@ -1561,7 +1917,7 @@ async function refreshOverloadRows(client, routineId) {
       scheme: row.scheme,
       sets: Number(row.sets) || 1,
       suggested: Number(row.suggested) || 0,
-      targetReps: Number(row.target_reps) || targetValueFromReps(row.scheme),
+      targetReps: targetValueFromExercise(row.target_reps, row.scheme),
       metric: progressionMetricFor(row.name, row.scheme, row.suggested, row.progression_metric),
       logs: [],
     };
@@ -1761,7 +2117,8 @@ async function interpretRoutine({ text, weightKg, heightM }) {
     const payload = JSON.parse(body);
     const content = payload?.choices?.[0]?.message?.content;
     const parsed = jsonFromModel(content);
-    const days = normalizeImportedDays(parsed.days);
+    const parsedDays = normalizeImportedDays(parsed.days);
+    const days = await resolveImportedCatalogExercises(pool, parsedDays);
     return {
       routineName: textValue(parsed.routineName, 'Rutina importada').slice(0, 120),
       days,
@@ -1832,12 +2189,19 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
     return reply.code(400).send({ error: error.message });
   }
 
-  await ensureUser(request.userId);
+  const profile = await ensureUser(request.userId);
+  if (profile.role === 'athlete' && !profile.solo_training) {
+    return reply.code(403).send({
+      error: 'Tu rutina fue asignada por un entrenador y no se puede reemplazar desde el perfil del alumno',
+    });
+  }
+
   const client = await pool.connect();
   const routineIds = [];
   const planId = `plan-${randomUUID()}`;
   try {
     await client.query('BEGIN');
+    days = await resolveImportedCatalogExercises(client, days);
     await removeAthleteRoutines(client, request.userId);
 
     for (const [dayIndex, day] of days.entries()) {
@@ -1865,8 +2229,8 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
         await client.query(
           `INSERT INTO exercise
             (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
-             last_date, last_load, last_reps, last_note)
-           VALUES ($1, $2, $3, $4, $5, 30, $6, $7, $8, $9, NULL, NULL, NULL, NULL)`,
+             last_date, last_load, last_reps, last_note, catalog_id)
+           VALUES ($1, $2, $3, $4, $5, 30, $6, $7, $8, $9, NULL, NULL, NULL, NULL, $10)`,
           [
             exerciseId,
             exercise.name,
@@ -1877,6 +2241,7 @@ app.post('/v1/import/routines', { preHandler: authenticate }, async (request, re
             day.name,
             'Confirmá la carga y la técnica antes de comenzar.',
             body.autoOverload === true ? 2.5 : null,
+            exercise.catalogId ?? null,
           ],
         );
         await client.query(
@@ -2069,6 +2434,16 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const coachResult = await client.query(
+      `SELECT c.id
+         FROM coach c
+         JOIN app_user u ON u.clerk_user_id = $1
+        WHERE u.role = 'coach'
+          AND LOWER(c.name) = LOWER(u.display_name)
+        LIMIT 1`,
+      [request.userId],
+    );
+    const coachId = coachResult.rows[0]?.id ?? null;
     const templateResult = await client.query('SELECT id, name FROM template WHERE id = $1', [templateId]);
     const templateRow = templateResult.rows[0];
     if (!templateRow) {
@@ -2125,7 +2500,7 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
         await client.query(
           `INSERT INTO routine
             (id, plan_id, name, block, week, week_start, day, coach_id, athlete_id, estimated_minutes, seconds_per_set, is_today, load_mode)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8, $9, 45, $10, $11)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 45, $11, $12)`,
           [
             routineId,
             planId,
@@ -2134,6 +2509,7 @@ app.post('/v1/templates/:id/assign', { preHandler: authenticate }, async (reques
             week,
             weekStart,
             day.day,
+            coachId,
             athleteId,
             Math.max(10, Math.ceil(totalSets * 2.25 + day.exercises.length * 1.5)),
             dayIndex === 0 ? 1 : 0,
@@ -2626,6 +3002,17 @@ async function removeAthleteRoutines(client, userId) {
 }
 
 app.delete('/v1/routines/current', { preHandler: authenticate }, async (request, reply) => {
+  const profile = await pool.query(
+    'SELECT role, solo_training FROM app_user WHERE clerk_user_id = $1 LIMIT 1',
+    [request.userId],
+  );
+  const user = profile.rows[0];
+  if (user?.role !== 'athlete' || !user.solo_training) {
+    return reply.code(403).send({
+      error: 'Las rutinas asignadas por un entrenador no se pueden eliminar desde el perfil del alumno',
+    });
+  }
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

@@ -6,6 +6,7 @@ export type DayMark = 'done' | 'today' | 'rest' | 'planned';
 
 export type Exercise = {
   id: string;
+  catalogId?: string;
   name: string;
   /** "4 × 8" */
   scheme: string;
@@ -20,6 +21,16 @@ export type Exercise = {
   focus: string;
   /** canonical detail groups resolved from stored groups, focus and name */
   muscleGroups: string[];
+  /** Optional metadata supplied by the external exercise catalog. */
+  nameEn?: string;
+  equipment?: string;
+  target?: string;
+  secondaryMuscles?: string[];
+  instructions?: string;
+  instructionSteps?: string[];
+  imageUrl?: string;
+  gifUrl?: string;
+  attribution?: string;
   cues: string;
   /** week-over-week auto progression in kg */
   overload: number | null;
@@ -134,6 +145,10 @@ export type OverloadRow = {
 export type ImportedExercise = {
   id: string;
   name: string;
+  catalogId?: string;
+  catalogName?: string;
+  catalogFocus?: string;
+  catalogMatched?: boolean;
   sets: number;
   reps: string;
   load: number | null;
@@ -146,6 +161,7 @@ export type ImportedExercise = {
   question?: string;
   options?: [string, string];
   progressionMetric?: 'load' | 'reps' | 'seconds';
+  note?: string;
 };
 
 export type ImportedRoutineDay = {

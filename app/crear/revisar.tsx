@@ -60,6 +60,7 @@ export default function CreatorReview() {
                   <Row
                     left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
                     title={exercise.name}
+                    titleNumberOfLines={2}
                     meta={`${exercise.sets} × ${exercise.reps}`}
                   />
                   {exercise.note.trim() ? (

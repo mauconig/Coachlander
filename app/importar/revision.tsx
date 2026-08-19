@@ -126,6 +126,11 @@ export default function ImportReview() {
                   title={item.name}
                   meta={`${item.sets} × ${item.reps} · ${item.rest} s`}
                 />
+                {item.catalogMatched === false ? (
+                  <Txt variant="meta" tone={color.textFaint}>
+                    Ejercicio manual: no encontramos una coincidencia en el catálogo.
+                  </Txt>
+                ) : null}
                 <View style={styles.loadRow}>
                   <Txt variant="label" tone={color.textMuted}>
                     CARGA SUGERIDA

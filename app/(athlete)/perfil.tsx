@@ -1,6 +1,6 @@
 import { useAuth } from '@clerk/expo';
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 
 import { deleteCurrentRoutine } from '@/api/client';
@@ -29,6 +29,15 @@ export default function AthleteProfile() {
   const routine = useQuery(getTodayRoutine);
   const [deletingRoutine, setDeletingRoutine] = useState(false);
   const [routineError, setRoutineError] = useState('');
+  const canDeleteRoutine = draft.soloTraining;
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshRemoteData().catch((error: unknown) => {
+        console.warn('[Coachlander] No se pudo actualizar el perfil', error);
+      });
+    }, [refreshRemoteData]),
+  );
 
   const removeRoutine = async () => {
     setDeletingRoutine(true);
@@ -64,7 +73,8 @@ export default function AthleteProfile() {
         </View>
       </View>
 
-      <Card tone="muted" padding={18} gap={12}>
+      {canDeleteRoutine ? (
+        <Card tone="muted" padding={18} gap={12}>
         <Txt variant="label" tone={color.lime}>
           GESTIONAR RUTINA
         </Txt>
@@ -73,36 +83,43 @@ export default function AthleteProfile() {
         </Txt>
         <Txt variant="body" tone={color.textMuted}>
           {routine.id
-            ? 'Podés reemplazar tu plan o eliminarlo para volver a empezar.'
-            : 'Importá una rutina de entre 1 y 7 días para verla en Hoy.'}
+            ? canDeleteRoutine
+              ? 'Podés reemplazar tu plan o eliminarlo para volver a empezar.'
+              : 'Esta rutina fue asignada y la administra tu entrenadora.'
+            : canDeleteRoutine
+              ? 'Importá una rutina de entre 1 y 7 días para verla en Hoy.'
+              : 'Tu entrenadora todavía no te asignó una rutina.'}
         </Txt>
-        <View style={styles.routineActions}>
-          <Button
-            label={routine.id ? 'Cambiar rutina' : 'Cargar rutina'}
-            variant={routine.id ? 'outline' : 'primary'}
-            size="sm"
-            fill
-            onPress={() => router.push('/importar/origen')}
-          />
-          {routine.id ? (
+        {canDeleteRoutine ? (
+          <View style={styles.routineActions}>
             <Button
-              label={deletingRoutine ? 'Eliminando...' : 'Eliminar'}
-              variant="ghost"
+              label={routine.id ? 'Cambiar rutina' : 'Cargar rutina'}
+              variant={routine.id ? 'outline' : 'primary'}
               size="sm"
-              onPress={confirmRemoveRoutine}
-              disabled={deletingRoutine}
+              fill
+              onPress={() => router.push('/importar/origen')}
             />
-          ) : null}
-        </View>
+            {routine.id ? (
+              <Button
+                label={deletingRoutine ? 'Eliminando...' : 'Eliminar'}
+                variant="ghost"
+                size="sm"
+                onPress={confirmRemoveRoutine}
+                disabled={deletingRoutine}
+              />
+            ) : null}
+          </View>
+        ) : null}
         {routineError ? <Txt variant="meta" tone={color.textSoft}>{routineError}</Txt> : null}
-      </Card>
+        </Card>
+      ) : null}
 
-      {!draft.soloTraining ? (
+      {!draft.soloTraining && coach.name ? (
         <Card tone="violet" padding={18} style={styles.coach}>
           <Avatar name={coach.name} size={46} tone="lime" />
           <View style={styles.coachText}>
             <Txt variant="label" tone={color.onViolet}>
-              TU ENTRENADORA
+              TU ENTRENADOR/A
             </Txt>
             <Txt variant="h5">{coach.name}</Txt>
           </View>

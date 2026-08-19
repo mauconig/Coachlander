@@ -110,7 +110,7 @@ export default function RoutineCreatorEditor() {
     <Pressable
       style={styles.addExercise}
       accessibilityRole="button"
-      onPress={() => router.push({ pathname: '/crear/catalogo', params: { day: String(day.day) } })}
+      onPress={() => router.push({ pathname: '/crear/musculos', params: { day: String(day.day) } })}
     >
       <Icon name="plus" size={16} tone={color.textMuted} />
       <Txt variant="bodyStrong" tone={color.textMuted}>
@@ -198,6 +198,7 @@ function ExerciseItem({
           </Pressable>
         }
         title={exercise.name}
+        titleNumberOfLines={2}
         meta={`${exercise.sets} × ${exercise.reps}`}
         chevron
         onPress={onPress}

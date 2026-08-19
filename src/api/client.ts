@@ -128,6 +128,63 @@ export function getBootstrap(tokenProvider: TokenProvider) {
   return request<RemoteBootstrap>(tokenProvider, '/v1/bootstrap');
 }
 
+export type CatalogMuscle = {
+  key: string;
+  label: string;
+  count: number;
+};
+
+export type CatalogExerciseSummary = {
+  id: string;
+  name: string;
+  focus: string;
+  equipment: string;
+  target: string;
+  imageUrl: string | null;
+  gifUrl: string | null;
+  muscleGroups: string[];
+};
+
+export type CatalogExercisePage = {
+  items: CatalogExerciseSummary[];
+  page: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
+};
+
+export type CatalogExerciseDetail = CatalogExerciseSummary & {
+  nameEn: string;
+  secondaryMuscles: string[];
+  instructions: string;
+  instructionSteps: string[];
+  attribution: string | null;
+};
+
+export function getCatalogMuscles(tokenProvider: TokenProvider) {
+  return request<{ items: CatalogMuscle[] }>(tokenProvider, '/v1/exercise-catalog/muscles');
+}
+
+export function getCatalogExercises(
+  tokenProvider: TokenProvider,
+  input: { muscle: string; search?: string; page?: number; limit?: number },
+) {
+  const query = new URLSearchParams({
+    muscle: input.muscle,
+    page: String(input.page ?? 1),
+    limit: String(input.limit ?? 24),
+  });
+  if (input.search?.trim()) query.set('search', input.search.trim());
+  return request<CatalogExercisePage>(tokenProvider, `/v1/exercise-catalog?${query.toString()}`);
+}
+
+export function getCatalogExercise(tokenProvider: TokenProvider, id: string) {
+  return request<CatalogExerciseDetail>(
+    tokenProvider,
+    `/v1/exercise-catalog/item/${encodeURIComponent(id)}`,
+  );
+}
+
 export type CoachHistorySession = {
   id: string;
   clientId: string;

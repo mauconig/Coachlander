@@ -2,7 +2,8 @@ import { useAuth } from '@clerk/expo';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Image } from 'expo-image';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -41,6 +42,7 @@ export default function LiveSession() {
   const refreshRemoteData = useRefreshRemoteData();
   const insets = useSafeAreaInsets();
   const routine = useQuery(getTodayRoutine);
+  const [mediaFailed, setMediaFailed] = useState(false);
 
   const session = useSession(routine.exercises, {
     unit,
@@ -64,6 +66,10 @@ export default function LiveSession() {
       console.warn('[Coachlander] No se pudo marcar el inicio de sesión', error);
     });
   }, [getToken, routine.id]);
+
+  useEffect(() => {
+    setMediaFailed(false);
+  }, [session.exercise.id]);
 
   const onCta = () => {
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -107,10 +113,23 @@ export default function LiveSession() {
         </Pressable>
       </View>
 
-      {/* Movement demo. A real clip drops in here; until then the slot keeps
-          the layout honest. */}
+      {/* GIF del movimiento actual; si falla, mostramos la imagen fija del catálogo. */}
       <View style={styles.demoWrap}>
         <View style={styles.demo}>
+          {session.exercise.gifUrl || session.exercise.imageUrl ? (
+            <Image
+              source={{
+                uri: mediaFailed
+                  ? session.exercise.imageUrl ?? session.exercise.gifUrl!
+                  : session.exercise.gifUrl ?? session.exercise.imageUrl!,
+              }}
+              style={styles.demoMedia}
+              contentFit="contain"
+              autoplay
+              onError={() => setMediaFailed(true)}
+              accessibilityLabel={`Demostración de ${session.exercise.name}`}
+            />
+          ) : null}
           <View style={styles.demoTagLeft}>
             <Txt variant="label" tone={color.text} numberOfLines={1}>
               {`EJERCICIO ${session.exerciseNumber} DE ${session.totalExercises}`}
@@ -121,9 +140,11 @@ export default function LiveSession() {
               LOOP 8 s
             </Txt>
           </View>
-          <Txt variant="metaSm" tone={color.textFaint} style={styles.demoCaption}>
-            [ demo del movimiento en video ]
-          </Txt>
+          {!session.exercise.gifUrl && !session.exercise.imageUrl ? (
+            <Txt variant="metaSm" tone={color.textFaint} style={styles.demoCaption}>
+              No hay una demostración disponible para este ejercicio.
+            </Txt>
+          ) : null}
         </View>
       </View>
 
@@ -356,6 +377,13 @@ const styles = StyleSheet.create({
     backgroundColor: color.surface,
     justifyContent: 'flex-end',
     padding: 18,
+  },
+  demoMedia: {
+    position: 'absolute',
+    top: 46,
+    right: 18,
+    bottom: 36,
+    left: 18,
   },
   demoTagLeft: {
     position: 'absolute',

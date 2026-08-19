@@ -61,7 +61,9 @@ export default function Clients() {
   }, [nextWeekStart]);
 
   const rest = clients
-    .filter((c) => !c.live)
+    // La tarjeta superior muestra sólo un alumno entrenando. Los demás no
+    // deben desaparecer de la lista si también tienen una sesión activa.
+    .filter((c) => c.id !== live?.id)
     .filter((c) => {
       if (filter === 'HOY') return true;
       if (filter === 'ATENCIÓN') return attentionIds.includes(c.id);
@@ -128,7 +130,7 @@ function ClientRow({
     <Row
       left={<Avatar name={client.name} size={44} />}
       title={client.name}
-      meta={lastSession ? `Última sesión: ${shortDate(lastSession)}` : 'Alumno/a nuevo/a'}
+      meta={client.live ? 'Entrenando ahora' : lastSession ? `Última sesión: ${shortDate(lastSession)}` : 'Alumno/a nuevo/a'}
       metaTone={needsAttention ? color.textSoft : color.textMuted}
       active={needsAttention}
       right={needsAttention ? <AttentionPill /> : undefined}
