@@ -45,6 +45,30 @@ export type SaveImportedRoutineInput = {
   autoOverload: boolean;
 };
 
+const NETWORK_ATTEMPTS = 3;
+const NETWORK_TIMEOUT_MS = 12_000;
+
+const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+async function fetchWithNetworkRetry(url: string, init?: RequestInit) {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < NETWORK_ATTEMPTS; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (error) {
+      lastError = error;
+      if (attempt < NETWORK_ATTEMPTS - 1) await wait(700 * (attempt + 1));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('No se pudo conectar con el servidor');
+}
+
 class ApiError extends Error {
   status: number;
 
@@ -63,7 +87,7 @@ async function request<T>(
   const token = await tokenProvider();
   if (!token) throw new ApiError(401, 'No hay una sesión de Clerk activa');
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json',
@@ -88,7 +112,7 @@ async function request<T>(
 }
 
 async function publicRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       Accept: 'application/json',

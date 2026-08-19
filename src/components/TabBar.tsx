@@ -1,5 +1,4 @@
-import { Tabs } from 'expo-router';
-import { router } from 'expo-router';
+import { Tabs, router, usePathname } from 'expo-router';
 import { Fragment, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
@@ -9,6 +8,8 @@ import { Icon, type IconName } from './Icon';
 import { Sheet } from './Sheet';
 import { Txt } from './Txt';
 import { useApp } from '@/state/AppState';
+import { useActiveSession } from '@/session/SessionProvider';
+import { mmss } from '@/lib/format';
 import { color, radius } from '@/theme/tokens';
 
 /**
@@ -36,13 +37,54 @@ const ICONS: Record<string, IconName> = {
 export function TabBar({ state, descriptors, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const { role, draft } = useApp();
+  const activeSession = useActiveSession();
+  const pathname = usePathname();
   const isCoach = role === 'coach';
   const isSoloAthlete = role === 'athlete' && draft.soloTraining;
   const showPlus = isCoach || isSoloAthlete;
   const [creatorOpen, setCreatorOpen] = useState(false);
 
+  const showMiniSession = role === 'athlete' && !!activeSession.runtime && pathname !== '/sesion';
+  const session = activeSession.runtime;
+  const sessionExercise = session?.exercises[session.state.exIndex];
+  const sessionClock = session
+    ? session.state.phase === 'overtime'
+      ? `+${mmss(session.state.overtime)}`
+      : mmss(session.state.left)
+    : '';
+
   return (
-    <View style={[styles.bar, { paddingBottom: insets.bottom + 14 }]}>
+    <View>
+      {showMiniSession && session && sessionExercise ? (
+        <Pressable
+          style={styles.miniSession}
+          onPress={() => {
+            activeSession.restore();
+            router.push('/sesion');
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Continuar sesión"
+        >
+          <View style={styles.miniSessionCopy}>
+            <Txt variant="labelSm" tone={color.lime}>
+              {session.state.paused ? 'SESIÓN PAUSADA' : 'SESIÓN ACTIVA'}
+            </Txt>
+            <Txt variant="rowTitle" numberOfLines={1}>
+              {sessionExercise.name}
+            </Txt>
+          </View>
+          <View style={styles.miniSessionClock}>
+            <Txt variant="statSm" tone={session.state.phase === 'overtime' ? '#FF5D67' : color.lime}>
+              {sessionClock}
+            </Txt>
+            <Txt variant="labelSm" tone={color.textFaint}>
+              {session.state.phase === 'rest' ? 'DESCANSO' : session.state.phase === 'overtime' ? 'SOBRETIEMPO' : 'CONTINUAR'}
+            </Txt>
+          </View>
+        </Pressable>
+      ) : null}
+
+      <View style={[styles.bar, { paddingBottom: insets.bottom + 14 }]}>
       {state.routes.map((route, index) => {
         const { options } = descriptors[route.key];
         const focused = state.index === index;
@@ -123,11 +165,28 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
           <Icon name="chevron-right" size={16} tone={color.textMuted} />
         </Pressable>
       </Sheet>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  miniSession: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 14,
+    marginHorizontal: 14,
+    marginBottom: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: color.lime,
+    backgroundColor: color.surface,
+  },
+  miniSessionCopy: { flex: 1, gap: 3 },
+  miniSessionClock: { alignItems: 'flex-end', gap: 2 },
   bar: {
     flexDirection: 'row',
     justifyContent: 'space-between',

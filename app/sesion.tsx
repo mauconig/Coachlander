@@ -2,7 +2,7 @@ import { useAuth } from '@clerk/expo';
 import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useKeepAwake } from 'expo-keep-awake';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image } from 'expo-image';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,6 +47,8 @@ export default function LiveSession() {
   const session = useSession(routine.exercises, {
     unit,
     estimatedMinutes: routine.estimatedMinutes,
+    routineId: routine.id,
+    routineTitle: `${routine.block} · ${routine.name}`,
     onSetLogged: (entry) => {
       const payload = { routineId: routine.id, ...entry };
       void pushSetLog(getToken, payload)
@@ -58,14 +60,15 @@ export default function LiveSession() {
   });
 
   // Marca "entrenando ahora" en el cliente vinculado al abrir la sesión.
-  const sessionStarted = useRef(false);
   useEffect(() => {
-    if (sessionStarted.current || !routine.id) return;
-    sessionStarted.current = true;
-    void startSession(getToken, routine.id).catch((error: unknown) => {
-      console.warn('[Coachlander] No se pudo marcar el inicio de sesión', error);
-    });
-  }, [getToken, routine.id]);
+    // No enviar el inicio remoto mientras el atleta sigue en el countdown.
+    if (session.remoteStarted || !routine.id || session.phase === 'countdown') return;
+    void startSession(getToken, routine.id)
+      .then(() => session.markRemoteStarted())
+      .catch((error: unknown) => {
+        console.warn('[Coachlander] No se pudo marcar el inicio de sesión', error);
+      });
+  }, [getToken, routine.id, session.markRemoteStarted, session.phase, session.remoteStarted]);
 
   useEffect(() => {
     setMediaFailed(false);
@@ -76,10 +79,11 @@ export default function LiveSession() {
     if (session.press() === 'finish') {
       void endSession(getToken, routine.id)
         .then(() => refreshRemoteData())
+        .then(() => session.finish())
+        .then(() => router.back())
         .catch((error: unknown) => {
           console.warn('[Coachlander] No se pudo marcar la sesión como completada', error);
         });
-      router.back();
     }
   };
 
@@ -88,7 +92,10 @@ export default function LiveSession() {
       <View style={styles.bar}>
         <Pressable
           hitSlop={hitSlop}
-          onPress={() => router.back()}
+          onPress={() => {
+            session.minimize();
+            router.back();
+          }}
           style={styles.circle}
           accessibilityRole="button"
           accessibilityLabel="Minimizar sesión"

@@ -1,295 +1,197 @@
-import { useCallback, useEffect, useMemo, useReducer } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 
 import type { Exercise, Unit } from '@/data/types';
 import { mmss, num, repsOfScheme, weightLabel } from '@/lib/format';
 import { color } from '@/theme/tokens';
+import {
+  createInitialSessionState,
+  reduceSessionState,
+  type LoggedSet,
+  type SessionPhase,
+} from './sessionMachine';
+import { useSessionContext } from './SessionProvider';
+import { playSessionTone } from './sessionFeedback';
 
-export type Phase = 'work' | 'rest';
+export type Phase = SessionPhase;
+export type { LoggedSet } from './sessionMachine';
 
-export type LoggedSet = {
-  done: boolean;
-  /** load used; null while pending, 0 for bodyweight */
-  load: number | null;
-  reps: number | null;
+const EMPTY_EXERCISE: Exercise = {
+  id: 'empty-exercise',
+  name: 'Preparando sesión',
+  scheme: '3 × 8',
+  suggested: 0,
+  sets: 0,
+  work: 45,
+  rest: 90,
+  focus: '',
+  muscleGroups: [],
+  cues: '',
+  overload: null,
+  loadSource: 'ai',
+  loadReason: '',
+  progressionMetric: 'load',
+  targetReps: 8,
 };
 
-type State = {
-  exIndex: number;
-  /** seconds since the session started */
-  elapsed: number;
-  phase: Phase;
-  /** seconds left in the current phase */
-  left: number;
-  sets: LoggedSet[];
-  /** index of the set awaiting a load, or null when no sheet is open */
-  sheet: number | null;
-  keypad: boolean;
-  typed: string;
-  queueOpen: boolean;
-  /** every set of every exercise is logged */
-  finished: boolean;
+export type UseSessionOptions = {
+  unit?: Unit;
+  estimatedMinutes?: number;
+  routineId?: string;
+  routineTitle?: string;
+  onSetLogged?: (entry: {
+    exerciseId: string;
+    setIndex: number;
+    load: number | null;
+    reps: number;
+  }) => void;
 };
 
-type Action =
-  | { type: 'tick'; work: number }
-  | { type: 'cta'; work: number }
-  | { type: 'goto'; index: number; exercises: Exercise[] }
-  | { type: 'log'; index: number; load: number | null; reps: number; rest: number }
-  | { type: 'openKeypad' }
-  | { type: 'closeSheet' }
-  | { type: 'press'; key: string }
-  | { type: 'toggleQueue' };
+export function useSession(exercises: Exercise[], options: UseSessionOptions = {}) {
+  const {
+    unit = 'kg',
+    estimatedMinutes = 48,
+    routineId = 'local-session',
+    routineTitle = 'Rutina',
+    onSetLogged,
+  } = options;
+  const context = useSessionContext();
+  const runtime = context.runtime?.routineId === routineId ? context.runtime : null;
+  const sessionExercises = runtime?.exercises ?? exercises;
+  const fallbackState = useMemo(() => createInitialSessionState(sessionExercises), [sessionExercises]);
+  const state = runtime?.state ?? fallbackState;
 
-const emptySets = (n: number): LoggedSet[] =>
-  Array.from({ length: n }, () => ({ done: false, load: null, reps: null }));
+  useEffect(() => {
+    context.ensureSession({ routineId, routineTitle, exercises, onSetLogged });
+  }, [context.ensureSession, exercises, onSetLogged, routineId, routineTitle]);
 
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case 'tick': {
-      const elapsed = state.elapsed + 1;
-      // While the logging sheet is open the phase clock holds; only the
-      // total session time keeps running.
-      if (state.sheet !== null || state.finished) return { ...state, elapsed };
-      if (state.left > 1) return { ...state, elapsed, left: state.left - 1 };
-      // Rest rolls straight back into the next working set; a finished work
-      // phase parks at zero and waits for the athlete.
-      if (state.phase === 'rest') {
-        return { ...state, elapsed, phase: 'work', left: action.work };
-      }
-      return { ...state, elapsed, left: 0 };
-    }
-
-    case 'cta': {
-      if (state.phase === 'rest') return { ...state, phase: 'work', left: action.work };
-      const pending = state.sets.findIndex((s) => !s.done);
-      if (pending < 0) return state; // handled by the caller (advance / finish)
-      return { ...state, sheet: pending, keypad: false, typed: '' };
-    }
-
-    case 'goto': {
-      const next = action.exercises[action.index];
-      if (!next) return state;
-      return {
-        ...state,
-        exIndex: action.index,
-        sets: emptySets(next.sets),
-        phase: 'work',
-        left: next.work,
-        sheet: null,
-        keypad: false,
-        typed: '',
-        queueOpen: false,
-      };
-    }
-
-    case 'log': {
-      const sets = state.sets.map((s, i) =>
-        i === action.index ? { done: true, load: action.load, reps: action.reps } : s,
-      );
-      const base = { ...state, sets, sheet: null, keypad: false, typed: '' };
-      // Last set of the exercise: hold still, the screen advances on its own.
-      if (sets.every((s) => s.done)) return base;
-      return { ...base, phase: 'rest', left: action.rest };
-    }
-
-    case 'openKeypad':
-      return { ...state, keypad: true, typed: '' };
-
-    case 'closeSheet':
-      return { ...state, sheet: null, keypad: false, typed: '' };
-
-    case 'press': {
-      if (action.key === 'del') return { ...state, typed: state.typed.slice(0, -1) };
-      if (state.typed.length > 5) return state;
-      return { ...state, typed: state.typed + action.key };
-    }
-
-    case 'toggleQueue':
-      return { ...state, queueOpen: !state.queueOpen };
-
-    default:
-      return state;
-  }
-}
-
-const initial = (exercises: Exercise[]): State => ({
-  exIndex: 0,
-  elapsed: 0,
-  phase: 'work',
-  left: exercises[0]?.work ?? 45,
-  sets: emptySets(exercises[0]?.sets ?? 0),
-  sheet: null,
-  keypad: false,
-  typed: '',
-  queueOpen: false,
-  finished: false,
-});
-
-/**
- * Drives the live session screen: the phase clock, the per-set log and the
- * weight picker. Mirrors the state machine in the design doc — a set is
- * logged with a load, which starts the rest timer, which rolls into the next
- * working set.
- */
-export function useSession(
-  exercises: Exercise[],
-  options: {
-    unit?: Unit;
-    estimatedMinutes?: number;
-    /** fired once per closed set, for persistence */
-    onSetLogged?: (entry: {
-      exerciseId: string;
-      setIndex: number;
-      load: number | null;
-      reps: number;
-    }) => void;
-  } = {},
-) {
-  const { unit = 'kg', estimatedMinutes = 48, onSetLogged } = options;
-  const [state, dispatch] = useReducer(reducer, exercises, initial);
-
-  const exercise = exercises[state.exIndex];
+  const exercise = sessionExercises[state.exIndex] ?? EMPTY_EXERCISE;
   const reps = repsOfScheme(exercise.scheme);
-
-  useEffect(() => {
-    const id = setInterval(() => dispatch({ type: 'tick', work: exercise.work }), 1000);
-    return () => clearInterval(id);
-  }, [exercise.work]);
-
-  const goTo = useCallback(
-    (index: number) => {
-      const clamped = Math.max(0, Math.min(exercises.length - 1, index));
-      if (clamped !== state.exIndex) dispatch({ type: 'goto', index: clamped, exercises });
-    },
-    [exercises, state.exIndex],
-  );
-
-  const logSet = useCallback(
-    (index: number, load: number | null) => {
-      dispatch({ type: 'log', index, load, reps, rest: exercise.rest });
-      onSetLogged?.({ exerciseId: exercise.id, setIndex: index, load, reps });
-    },
-    [exercise.id, exercise.rest, onSetLogged, reps],
-  );
-
-  const done = state.sets.filter((s) => s.done).length;
-  const pending = state.sets.findIndex((s) => !s.done);
+  const done = state.sets.filter((item) => item.done).length;
+  const pending = state.sets.findIndex((item) => !item.done);
   const exerciseComplete = pending < 0;
-  const isLastExercise = state.exIndex === exercises.length - 1;
-  const sessionComplete = exerciseComplete && isLastExercise;
+  const isLastExercise = state.exIndex >= sessionExercises.length - 1;
+  const sessionComplete = exerciseComplete && isLastExercise && sessionExercises.length > 0;
+  const resting = state.phase === 'rest';
+  const total = state.phase === 'countdown' ? 10 : state.phaseDuration;
 
-  // Once the last set of a non-final exercise lands, slide to the next one so
-  // the athlete never has to tap through.
+  const dispatch = useCallback((action: Parameters<typeof reduceSessionState>[1]) => {
+    context.dispatch(action);
+  }, [context.dispatch]);
+
+  const goTo = useCallback((index: number) => {
+    const clamped = Math.max(0, Math.min(sessionExercises.length - 1, index));
+    if (clamped === state.exIndex) return;
+    dispatch({ type: 'goto', index: clamped, exercises: sessionExercises, now: Date.now() });
+  }, [dispatch, sessionExercises, state.exIndex]);
+
+  const logSet = useCallback((index: number, load: number | null) => {
+    dispatch({ type: 'log', index, load, reps, rest: exercise.rest, now: Date.now() });
+    if (state.soundEnabled) playSessionTone('set');
+    onSetLogged?.({ exerciseId: exercise.id, setIndex: index, load, reps });
+  }, [dispatch, exercise.id, exercise.rest, onSetLogged, reps, state.soundEnabled]);
+
   useEffect(() => {
-    if (!exerciseComplete || isLastExercise) return;
+    if (!runtime || !exerciseComplete || isLastExercise || state.phase === 'countdown') return;
     const id = setTimeout(() => goTo(state.exIndex + 1), 700);
     return () => clearTimeout(id);
-  }, [exerciseComplete, isLastExercise, goTo, state.exIndex]);
-
-  const resting = state.phase === 'rest';
-  const total = resting ? exercise.rest : exercise.work;
+  }, [exerciseComplete, goTo, isLastExercise, runtime, state.exIndex, state.phase]);
 
   const derived = useMemo(() => {
-    const phaseLabel = resting
-      ? 'DESCANSO'
-      : exerciseComplete
-        ? 'EJERCICIO COMPLETO'
-        : state.left === 0
-          ? `TIEMPO CUMPLIDO · SERIE ${pending + 1}`
-          : `SERIE ${pending + 1} EN CURSO`;
-
-    const ctaLabel = resting
-      ? 'Saltar descanso'
-      : sessionComplete
-        ? 'Terminar sesión'
+    const phaseLabel = state.phase === 'countdown'
+      ? 'PREPARANDO SESIÓN'
+      : resting
+        ? 'DESCANSO'
         : exerciseComplete
-          ? 'Siguiente ejercicio'
-          : `Serie ${pending + 1} hecha`;
-
-    const queue = exercises.map((e, i) => ({
-      id: e.id,
-      index: i,
-      num: String(i + 1).padStart(2, '0'),
-      name: e.name,
-      meta: `${e.scheme} · ${weightLabel(e.suggested, unit)}`,
-      current: i === state.exIndex,
-      past: i < state.exIndex,
-      tag: i === state.exIndex ? 'AHORA' : i < state.exIndex ? 'HECHO' : '',
+          ? 'EJERCICIO COMPLETO'
+          : state.phase === 'overtime'
+            ? `TIEMPO CUMPLIDO · SERIE ${pending + 1}`
+            : `SERIE ${pending + 1} EN CURSO`;
+    const ctaLabel = state.phase === 'countdown'
+      ? 'SALTAR'
+      : resting
+        ? 'Saltar descanso'
+        : sessionComplete
+          ? 'Terminar sesión'
+          : exerciseComplete
+            ? 'Siguiente ejercicio'
+            : `Serie ${pending + 1} hecha`;
+    const queue = sessionExercises.map((item, index) => ({
+      id: item.id,
+      index,
+      num: String(index + 1).padStart(2, '0'),
+      name: item.name,
+      meta: `${item.scheme} · ${weightLabel(item.suggested, unit)}`,
+      current: index === state.exIndex,
+      past: index < state.exIndex,
+      tag: index === state.exIndex ? 'AHORA' : index < state.exIndex ? 'HECHO' : '',
     }));
 
     return {
       phaseLabel,
-      phaseColor: resting ? color.violetSoft : color.lime,
-      phaseClock: mmss(state.left),
-      phaseProgress: total > 0 ? state.left / total : 0,
+      phaseColor: resting ? color.violetSoft : state.phase === 'overtime' ? '#FF5D67' : color.lime,
+      phaseClock: state.phase === 'overtime' ? `+${mmss(state.overtime)}` : mmss(state.left),
+      phaseProgress: state.phase === 'overtime' ? 1 : total > 0 ? state.left / total : 0,
       setCounter: `SERIE ${Math.min(done + 1, state.sets.length)} DE ${state.sets.length}`,
-      elapsedLabel: `de ${total} s`,
+      elapsedLabel: state.phase === 'overtime' ? 'sobretiempo' : `de ${total} s`,
       remaining: `~${Math.max(1, estimatedMinutes - Math.floor(state.elapsed / 60))} MIN`,
       ctaLabel,
       queue,
       exerciseNumber: state.exIndex + 1,
       suggestedShort: weightLabel(exercise.suggested, unit),
       suggestedLabel: `${weightLabel(exercise.suggested, unit)} × ${reps}`,
-      moreLabel: `${
-        exercise.suggested ? `${num(exercise.suggested + 2.5)} ${unit}` : `Con lastre 5 ${unit}`
-      } × ${reps}`,
+      moreLabel: `${exercise.suggested ? `${num(exercise.suggested + 2.5)} ${unit}` : `Con lastre 5 ${unit}`} × ${reps}`,
       typedDisplay: (state.typed === '' ? '0' : state.typed).replace('.', ','),
     };
-  }, [
-    done,
-    estimatedMinutes,
-    exercise.suggested,
-    exerciseComplete,
-    exercises,
-    pending,
-    reps,
-    resting,
-    sessionComplete,
-    state.elapsed,
-    state.exIndex,
-    state.left,
-    state.sets.length,
-    state.typed,
-    total,
-    unit,
-  ]);
+  }, [done, estimatedMinutes, exercise, exerciseComplete, pending, resting, reps, sessionComplete, sessionExercises, state.elapsed, state.exIndex, state.left, state.overtime, state.phase, state.sets.length, state.typed, total, unit]);
 
   return {
     ...state,
     ...derived,
+    runtime,
     exercise,
     reps,
     resting,
     exerciseComplete,
     sessionComplete,
-    totalExercises: exercises.length,
-
-    /** primary CTA: log a set, skip rest, or advance */
+    totalExercises: sessionExercises.length,
+    remoteStarted: runtime?.remoteStarted ?? false,
     press: () => {
+      if (state.phase === 'countdown') {
+        dispatch({ type: 'cta', work: exercise.work, now: Date.now() });
+        return 'started' as const;
+      }
       if (sessionComplete && !resting) return 'finish' as const;
-      if (!resting && exerciseComplete) {
+      if (resting) {
+        dispatch({ type: 'cta', work: exercise.work, now: Date.now() });
+        return 'ok' as const;
+      }
+      if (exerciseComplete) {
         goTo(state.exIndex + 1);
         return 'advanced' as const;
       }
-      dispatch({ type: 'cta', work: exercise.work });
+      dispatch({ type: 'cta', work: exercise.work, now: Date.now() });
       return 'ok' as const;
     },
-    /** log with the load the plan suggested */
+    skipCountdown: () => dispatch({ type: 'cta', work: exercise.work, now: Date.now() }),
     useSuggested: () => state.sheet !== null && logSet(state.sheet, exercise.suggested),
-    /** log 2,5 kg above the plan (or 5 kg of added load for bodyweight work) */
-    useMore: () =>
-      state.sheet !== null && logSet(state.sheet, exercise.suggested ? exercise.suggested + 2.5 : 5),
-    /** log whatever was typed on the keypad */
+    useMore: () => state.sheet !== null && logSet(state.sheet, exercise.suggested ? exercise.suggested + 2.5 : 5),
     confirmTyped: () => {
       if (state.sheet === null) return;
       const parsed = state.typed === '' ? exercise.suggested : parseFloat(state.typed.replace(',', '.'));
       logSet(state.sheet, Number.isFinite(parsed) ? parsed : exercise.suggested);
     },
     openKeypad: () => dispatch({ type: 'openKeypad' }),
-    closeSheet: () => dispatch({ type: 'closeSheet' }),
+    closeSheet: () => dispatch({ type: 'closeSheet', now: Date.now() }),
     pressKey: (key: string) => dispatch({ type: 'press', key }),
     toggleQueue: () => dispatch({ type: 'toggleQueue' }),
     goTo,
+    minimize: () => dispatch({ type: 'minimize' }),
+    restore: () => dispatch({ type: 'restore' }),
+    togglePaused: () => dispatch({ type: 'togglePaused', now: Date.now() }),
+    toggleSound: () => dispatch({ type: 'toggleSound' }),
+    markRemoteStarted: context.markRemoteStarted,
+    finish: context.finish,
+    discard: context.discard,
   };
 }
 

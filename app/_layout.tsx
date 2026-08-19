@@ -16,6 +16,7 @@ import {
 } from '@expo-google-fonts/space-grotesk';
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
+import { SQLiteProvider } from 'expo-sqlite';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -23,6 +24,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AppStateProvider } from '@/state/AppState';
+import { initializeSessionDatabase, SessionProvider } from '@/session/SessionProvider';
 import { color } from '@/theme/tokens';
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
@@ -72,24 +74,28 @@ export default function RootLayout() {
       <GestureHandlerRootView style={{ flex: 1, backgroundColor: color.screen }}>
         <SafeAreaProvider>
           <ThemeProvider value={navTheme}>
-            <AppStateProvider>
-              <StatusBar style="light" />
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: color.screen },
-                  animation: 'slide_from_right',
-                }}
-              >
-                {/* Bootstrap already owns the loading transition; do not slide the tab shell in after it. */}
-                <Stack.Screen name="index" options={{ animation: 'none' }} />
-                <Stack.Screen name="(athlete)" options={{ animation: 'none' }} />
-                <Stack.Screen name="(coach)" options={{ animation: 'none' }} />
-                <Stack.Screen name="historial-estadisticas" options={{ animation: 'slide_from_right' }} />
-                <Stack.Screen name="progreso-alumno" options={{ animation: 'slide_from_right' }} />
-                <Stack.Screen name="sesion" options={{ animation: 'slide_from_bottom' }} />
-              </Stack>
-            </AppStateProvider>
+            <SQLiteProvider databaseName="coachlander-session.db" onInit={initializeSessionDatabase}>
+              <SessionProvider>
+                <AppStateProvider>
+                  <StatusBar style="light" />
+                  <Stack
+                    screenOptions={{
+                      headerShown: false,
+                      contentStyle: { backgroundColor: color.screen },
+                      animation: 'slide_from_right',
+                    }}
+                  >
+                    {/* Bootstrap already owns the loading transition; do not slide the tab shell in after it. */}
+                    <Stack.Screen name="index" options={{ animation: 'none' }} />
+                    <Stack.Screen name="(athlete)" options={{ animation: 'none' }} />
+                    <Stack.Screen name="(coach)" options={{ animation: 'none' }} />
+                    <Stack.Screen name="historial-estadisticas" options={{ animation: 'slide_from_right' }} />
+                    <Stack.Screen name="progreso-alumno" options={{ animation: 'slide_from_right' }} />
+                    <Stack.Screen name="sesion" options={{ animation: 'slide_from_bottom' }} />
+                  </Stack>
+                </AppStateProvider>
+              </SessionProvider>
+            </SQLiteProvider>
           </ThemeProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>
