@@ -97,7 +97,11 @@ export default function AthleteProfile() {
               variant={routine.id ? 'outline' : 'primary'}
               size="sm"
               fill
-              onPress={() => router.push('/importar/origen')}
+              onPress={() =>
+                routine.id
+                  ? router.push({ pathname: '/rutina/[id]', params: { id: routine.id } })
+                  : router.push('/importar/origen')
+              }
             />
             {routine.id ? (
               <Button

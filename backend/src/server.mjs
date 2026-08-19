@@ -282,12 +282,150 @@ const catalogAliasMap = {
   'press de pecho': ['bench press', 'chest press'],
   'remo sentado': ['seated row', 'cable row'],
   'sentadilla goblet': ['goblet squat'],
-  'sentadilla con barra smith': ['smith full squat'],
+  'sentadilla con barra smith': ['smith full squat', 'smith squat'],
   'peso muerto rumano': ['romanian deadlift'],
   plancha: ['plank'],
 };
 
-function findCatalogMatchByName(catalogRows, name) {
+// Los nombres del catálogo provienen de una traducción automática y no siempre
+// coinciden con el nombre que usa un gimnasio. Estas equivalencias son sólo
+// para importar texto: la rutina sigue mostrando el nombre español del catálogo
+// una vez encontrada la coincidencia, por lo que también conserva su GIF.
+const importedCatalogIdAliases = {
+  'sentadilla con barra smith': '0770',
+  'smith squat': '0770',
+  'prensa 45': '0739',
+  'prensa 45 grados': '0739',
+  'silla para cuadriceps unilateral': '0585',
+  'silla para cuadriceps': '0585',
+  'camilla para isquios': '0586',
+  'camilla de isquios': '0586',
+  aductor: '0598',
+  aductores: '0598',
+  pantorrillas: '1373',
+  pantorillas: '1373',
+  'press en maquina': '0577',
+  'press en maquina de pecho': '0577',
+  'press inclinado articulado': '1299',
+  'dominada asistida': '0017',
+  'remo en maquina': '1350',
+  'vuelos laterales': '0334',
+  'press militar con mancuernas o maquina': '0405',
+  'press militar con mancuernas': '0405',
+  'press militar en maquina': '0603',
+  'peso muerto rumano': '0085',
+  bulgara: '0410',
+  bulgaro: '0410',
+  'sentadilla bulgara': '0410',
+  'hip trust maquina': '2286',
+  'hip thrust maquina': '2286',
+  'maquina de isquios vertical': '0599',
+  'silla de extensiones': '0585',
+  'silla de extension': '0585',
+  'cierre en maquina': '0596',
+  'cierre maquina': '0596',
+  'jalon abierto al pecho': '0818',
+  'jalon abierto pecho': '0818',
+  'fondo en maquina asistida': '0009',
+  'fondos en maquina asistida': '0009',
+  'remo abierto articulado': '1350',
+  'extensiones de triceps en polea': '0241',
+  'extension de triceps en polea': '0241',
+  'extensions de triceps en polea': '0241',
+  'curl de biceps en polea': '0868',
+};
+
+const importedSearchReplacements = [
+  [/vuelos? laterales?/g, 'lateral raise'],
+  [/press militar/g, 'shoulder press'],
+  [/peso muerto rumano/g, 'romanian deadlift'],
+  [/sentadillas? bulgaras?/g, 'split squat'],
+  [/\bbulgar[ao]?\b/g, 'split squat'],
+  [/hip trusts?/g, 'hip thrust'],
+  [/hip thrusts?/g, 'hip thrust'],
+  [/prensas?(?: de piernas?)?/g, 'leg press'],
+  [/sentadillas?/g, 'squat'],
+  [/cuadriceps?/g, 'quads'],
+  [/(?:isquios|femorales?)/g, 'hamstrings'],
+  [/pantorillas?/g, 'calf'],
+  [/aductores?/g, 'adduction'],
+  [/dominadas?/g, 'pull up'],
+  [/jalones?/g, 'pulldown'],
+  [/remos?/g, 'row'],
+  [/fondos?/g, 'dip'],
+  [/extensiones? de triceps?/g, 'triceps extension'],
+  [/extensiones?/g, 'extension'],
+  [/triceps?/g, 'triceps'],
+  [/biceps?/g, 'biceps'],
+  [/mancuernas?/g, 'dumbbell'],
+  [/barras?/g, 'barbell'],
+  [/poleas?/g, 'cable'],
+  [/maquinas?|articulados?|articuladas?/g, 'machine'],
+  [/camillas?/g, 'lying'],
+  [/sillas?/g, 'machine'],
+  [/cierres?/g, 'fly'],
+];
+
+const importedSearchStopWords = new Set([
+  'a', 'al', 'de', 'del', 'el', 'en', 'la', 'las', 'los', 'o', 'para', 'por', 'con',
+  'un', 'una', 'y', 'y/o', 'the', 'on', 'of', 'and', 'to', 'with', 'v', 'bar', 'machine',
+]);
+
+function importedSearchTokens(value) {
+  let normalized = normalizeName(value);
+  for (const [pattern, replacement] of importedSearchReplacements) normalized = normalized.replace(pattern, replacement);
+  return new Set(
+    normalized
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 1 && !importedSearchStopWords.has(token)),
+  );
+}
+
+function catalogSearchText(row) {
+  return [
+    row.name_en,
+    row.name_es,
+    row.target_en,
+    row.target_es,
+    row.equipment_en,
+    row.equipment_es,
+    row.muscle_group_en,
+    row.muscle_group_es,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+function findFuzzyCatalogMatch(catalogRows, name) {
+  const inputTokens = importedSearchTokens(name);
+  if (!inputTokens.size) return null;
+
+  const scored = catalogRows
+    .map((row) => {
+      const rowTokens = importedSearchTokens(catalogSearchText(row));
+      const overlap = [...inputTokens].filter((token) => rowTokens.has(token));
+      const nameTokens = new Set([
+        ...importedSearchTokens(row.name_en),
+        ...importedSearchTokens(row.name_es),
+      ]);
+      const nameOverlap = overlap.filter((token) => nameTokens.has(token));
+      const score = overlap.length + (nameOverlap.length * 0.75);
+      return { row, score, overlap: overlap.length, nameOverlap: nameOverlap.length };
+    })
+    .filter((item) => item.overlap > 0)
+    .sort((a, b) => b.score - a.score || b.nameOverlap - a.nameOverlap);
+
+  if (!scored.length) return null;
+  const best = scored[0];
+  const second = scored[1];
+  // Sólo usamos el fallback cuando hay una señal semántica real. Las frases
+  // conocidas de arriba tienen prioridad y no pasan por esta heurística.
+  if (best.score < 2 || (second && best.score === second.score && best.nameOverlap === second.nameOverlap)) return null;
+  return best.row;
+}
+
+function findCatalogMatchByName(catalogRows, name, { allowFuzzy = false } = {}) {
   const normalized = normalizeName(name);
   if (!normalized) return null;
   const exact = catalogRows.find(
@@ -295,16 +433,28 @@ function findCatalogMatchByName(catalogRows, name) {
   );
   if (exact) return exact;
 
+  const directId = importedCatalogIdAliases[normalized];
+  if (directId) {
+    const direct = catalogRows.find((row) => String(row.id) === directId);
+    if (direct) return direct;
+  }
+
   const aliases = catalogAliasMap[normalized] ?? [];
   const aliasMatches = catalogRows.filter((row) =>
     aliases.some((alias) => {
       const normalizedAlias = normalizeName(alias);
       const nameEn = normalizeName(row.name_en);
       const nameEs = normalizeName(row.name_es);
-      return nameEn === normalizedAlias || nameEs === normalizedAlias || nameEn.includes(normalizedAlias);
+      return (
+        nameEn === normalizedAlias ||
+        nameEs === normalizedAlias ||
+        nameEn.includes(normalizedAlias) ||
+        nameEs.includes(normalizedAlias)
+      );
     }),
   );
-  return aliasMatches.length === 1 ? aliasMatches[0] : null;
+  if (aliasMatches.length === 1) return aliasMatches[0];
+  return allowFuzzy ? findFuzzyCatalogMatch(catalogRows, name) : null;
 }
 
 async function resolveImportedCatalogExercises(queryable, days) {
@@ -319,7 +469,7 @@ async function resolveImportedCatalogExercises(queryable, days) {
   return days.map((day) => ({
     ...day,
     exercises: day.exercises.map((exercise) => {
-      const catalog = findCatalogMatchByName(result.rows, exercise.name);
+      const catalog = findCatalogMatchByName(result.rows, exercise.name, { allowFuzzy: true });
       if (!catalog) return { ...exercise, catalogMatched: false };
       return {
         ...exercise,
@@ -2623,8 +2773,9 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a actualizar' });
 
   const profile = await ensureUser(request.userId);
-  if (profile.role !== 'coach') {
-    return reply.code(403).send({ error: 'Solo un coach puede editar rutinas' });
+  const isSoloAthlete = profile.role === 'athlete' && profile.solo_training === true;
+  if (profile.role !== 'coach' && !isSoloAthlete) {
+    return reply.code(403).send({ error: 'Sólo un coach o un atleta independiente puede editar rutinas' });
   }
 
   const rawExercises = request.body?.exercises;
@@ -2660,6 +2811,7 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
 
     inputExercises.push({
       id,
+      catalogId: textValue(item?.catalogId) || null,
       name,
       sets,
       reps: normalizedReps(item?.reps),
@@ -2683,11 +2835,15 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
     transactionStarted = true;
 
     const routineResult = await client.query(
-      'SELECT id, athlete_id, block FROM routine WHERE id = $1 AND athlete_id IS NOT NULL FOR UPDATE',
+      'SELECT id, athlete_id, coach_id, block FROM routine WHERE id = $1 AND athlete_id IS NOT NULL FOR UPDATE',
       [routineId],
     );
     const routineRow = routineResult.rows[0];
     if (!routineRow) return reject(404, 'No encontramos esa rutina asignada');
+
+    if (isSoloAthlete && (routineRow.athlete_id !== request.userId || routineRow.coach_id)) {
+      return reject(403, 'Sólo podés editar tus propias rutinas independientes');
+    }
 
     await client.query("UPDATE routine SET load_mode = 'coach' WHERE id = $1", [routineId]);
 
@@ -2727,8 +2883,8 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
       const previous = item.id ? currentById.get(item.id) : null;
       let exerciseId = item.id;
       const rest = previous?.rest ?? 90;
-      const values = [
-        item.name,
+    const values = [
+      item.name,
         `${item.sets} \u00d7 ${item.reps}`,
         item.suggested,
         item.sets,
@@ -2736,20 +2892,21 @@ app.patch('/v1/routines/:id', { preHandler: authenticate }, async (request, repl
         rest,
         item.focus,
         item.cues,
-        item.overload,
-      ];
+      item.overload,
+    ];
 
       if (!previous || (item.id && usageById.get(item.id) > 1)) {
         exerciseId = `exercise-${randomUUID()}`;
         await client.query(
           `INSERT INTO exercise
-            (id, name, scheme, suggested, sets, work, rest, focus, cues, overload,
+            (id, name, scheme, suggested, sets, work, rest, focus, cues, overload, catalog_id,
              last_date, last_load, last_reps, last_note, load_source, load_reason,
              progression_metric, target_reps)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'coach', 'Carga ajustada por el entrenador.', $15, $16)`,
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, 'coach', 'Carga ajustada por el entrenador.', $16, $17)`,
           [
             exerciseId,
             ...values,
+            item.catalogId ?? null,
             previous?.last_date ?? null,
             previous?.last_load ?? null,
             previous?.last_reps ?? null,

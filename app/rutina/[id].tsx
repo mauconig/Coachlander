@@ -19,7 +19,7 @@ import { StatTile } from '@/components/StatTile';
 import { BackButton } from '@/components/TopBar';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
-import { getClient, getCurrentWeekStart, getOverloadRows, getRoutineById, getTemplates, weekIndexOf } from '@/db/queries';
+import { getAthlete, getClient, getCurrentWeekStart, getOverloadRows, getRoutineById, getTemplates, weekIndexOf } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import type { Exercise, OverloadRow } from '@/data/types';
 import { num } from '@/lib/format';
@@ -58,6 +58,7 @@ function draftFromCatalogSummary(exercise: CatalogExerciseSummary, fallbackFocus
   const draft = blankDraft(exercise.focus || fallbackFocus);
   return {
     ...draft,
+    catalogId: exercise.id,
     name: exercise.name,
     focus: exercise.focus || fallbackFocus,
     equipment: exercise.equipment,
@@ -123,6 +124,7 @@ function routinePayload(exercises: DraftExercise[]): UpdateRoutineInput {
   return {
     exercises: exercises.map((exercise) => ({
       ...(exercise.persistedId ? { id: exercise.persistedId } : {}),
+      ...(exercise.catalogId ? { catalogId: exercise.catalogId } : {}),
       name: exercise.name.trim(),
       sets: exercise.sets,
       reps: exercise.reps.trim(),
@@ -153,10 +155,12 @@ export default function RoutineDetail() {
   const clientId = paramValue(rawClientId);
   const weekStart = paramValue(rawWeekStart);
   const { getToken } = useAuth();
-  const { unit } = useApp();
+  const { unit, draft: appDraft } = useApp();
   const refreshRemoteData = useRefreshRemoteData();
   const routine = useQuery((data) => getRoutineById(data, id), [id]);
   const client = useQuery((data) => getClient(data, clientId), [clientId]);
+  const athlete = useQuery(getAthlete);
+  const isSoloAthlete = appDraft.role === 'athlete' && appDraft.soloTraining;
   const progressionByExercise = useQuery((data) => {
     const result: Record<string, OverloadRow | undefined> = {};
     for (const exercise of routine?.exercises ?? []) {
@@ -195,7 +199,7 @@ export default function RoutineDetail() {
   const dirty = baseline !== null && draftFingerprint(exercises) !== baseline;
   const pendingChanges = countChanges(exercises, original);
   const totalSets = exercises.reduce((total, exercise) => total + exercise.sets, 0);
-  const studentName = client?.name ?? 'Alumno';
+  const studentName = isSoloAthlete ? athlete.name : client?.name ?? 'Alumno';
   const weekLabel = weekStart === getCurrentWeekStart() ? 'ESTA SEMANA' : `SEMANA ${routine.week}`;
   const title = routineTitle(routine.name);
   const day = dayTitle(routine.name, routine.day);
@@ -324,11 +328,13 @@ export default function RoutineDetail() {
                 style={styles.saveButton}
               />
             </View>
-            <Pressable onPress={() => setChangeOpen(true)} accessibilityRole="button" hitSlop={hitSlop}>
-              <Txt variant="labelTight" tone={color.textFaint} center>
-                CAMBIAR RUTINA
-              </Txt>
-            </Pressable>
+            {!isSoloAthlete ? (
+              <Pressable onPress={() => setChangeOpen(true)} accessibilityRole="button" hitSlop={hitSlop}>
+                <Txt variant="labelTight" tone={color.textFaint} center>
+                  CAMBIAR RUTINA
+                </Txt>
+              </Pressable>
+            ) : null}
           </View>
         }
       >
@@ -351,12 +357,20 @@ export default function RoutineDetail() {
             </View>
             <View style={styles.dayCopy}>
               <Txt variant="rowTitle">{day}</Txt>
-              <Txt variant="meta" tone={color.textMuted}>Ajustes exclusivos para {studentName}</Txt>
+              <Txt variant="meta" tone={color.textMuted}>
+                {isSoloAthlete ? 'Ajustes de tu rutina' : `Ajustes exclusivos para ${studentName}`}
+              </Txt>
             </View>
           </View>
           <View style={styles.loadAudit}>
             <Txt variant="labelTight" tone={routine.loadMode === 'ai' ? color.violet : color.lime}>
-              {routine.loadMode === 'ai' ? 'CARGAS CALCULADAS POR IA' : 'CARGAS DEFINIDAS POR EL ENTRENADOR'}
+              {isSoloAthlete
+                ? routine.loadMode === 'ai'
+                  ? 'CARGAS CALCULADAS POR IA'
+                  : 'CARGAS DE TU RUTINA'
+                : routine.loadMode === 'ai'
+                  ? 'CARGAS CALCULADAS POR IA'
+                  : 'CARGAS DEFINIDAS POR EL ENTRENADOR'}
             </Txt>
             <Txt variant="meta" tone={color.textMuted}>
               Cada ejercicio conserva la última actuación y el motivo de la próxima recomendación.

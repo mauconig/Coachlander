@@ -667,6 +667,8 @@ export type UpdateExerciseInput = {
 
 export type RoutineExerciseInput = {
   id?: string;
+  /** Preserves the catalog/GIF when an exercise is added from the catalog. */
+  catalogId?: string;
   name: string;
   sets: number;
   reps: string;
