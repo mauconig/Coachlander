@@ -1,4 +1,4 @@
-import { API_BASE_URL } from '@/config/runtime';
+import { API_BASE_URL, E2E_RUN_ID, E2E_TRACE_ENABLED } from '@/config/runtime';
 import type { ImportedRoutineDay } from '@/data/types';
 
 export type TokenProvider = () => Promise<string | null>;
@@ -26,6 +26,8 @@ export type SetLogInput = {
   load: number | null;
   reps: number;
 };
+
+export type SessionSetInput = Omit<SetLogInput, 'routineId'>;
 
 export type ParseRoutineInput = {
   text: string;
@@ -69,6 +71,18 @@ async function fetchWithNetworkRetry(url: string, init?: RequestInit) {
   throw lastError instanceof Error ? lastError : new Error('No se pudo conectar con el servidor');
 }
 
+function traceApiRequest(method: string, path: string, status: number | 'network-error', startedAt: number) {
+  if (!E2E_TRACE_ENABLED || !E2E_RUN_ID || !__DEV__) return;
+  console.info(
+    '[Coachlander E2E API]',
+    JSON.stringify({ method, path, status, durationMs: Date.now() - startedAt, runId: E2E_RUN_ID }),
+  );
+}
+
+function e2eHeaders(): Record<string, string> {
+  return E2E_TRACE_ENABLED && E2E_RUN_ID ? { 'X-E2E-Run-Id': E2E_RUN_ID } : {};
+}
+
 class ApiError extends Error {
   status: number;
 
@@ -87,15 +101,25 @@ async function request<T>(
   const token = await tokenProvider();
   if (!token) throw new ApiError(401, 'No hay una sesión de Clerk activa');
 
-  const response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...init?.headers,
-    },
-  });
+  const startedAt = Date.now();
+  const method = init?.method ?? 'GET';
+  let response: Response;
+  try {
+    response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...e2eHeaders(),
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    traceApiRequest(method, path, 'network-error', startedAt);
+    throw error;
+  }
+  traceApiRequest(method, path, response.status, startedAt);
 
   if (!response.ok) {
     let message = `API ${response.status}`;
@@ -112,14 +136,24 @@ async function request<T>(
 }
 
 async function publicRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      ...init?.headers,
-    },
-  });
+  const startedAt = Date.now();
+  const method = init?.method ?? 'GET';
+  let response: Response;
+  try {
+    response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...e2eHeaders(),
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    traceApiRequest(method, path, 'network-error', startedAt);
+    throw error;
+  }
+  traceApiRequest(method, path, response.status, startedAt);
 
   if (!response.ok) {
     let message = `API ${response.status}`;
@@ -566,6 +600,16 @@ export function updateProfile(
 
 export function pushSetLog(tokenProvider: TokenProvider, input: SetLogInput) {
   return request<Record<string, unknown>>(tokenProvider, '/v1/set-logs', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export function syncSessionSets(
+  tokenProvider: TokenProvider,
+  input: { sessionId: string; routineId: string; sets: SessionSetInput[] },
+) {
+  return request<{ ok: true; routineId: string; sessionId: string; synced: number }>(tokenProvider, '/v1/session/sync', {
     method: 'POST',
     body: JSON.stringify(input),
   });

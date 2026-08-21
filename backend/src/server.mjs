@@ -15,6 +15,7 @@ const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
 const deepseekBaseUrl = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
 const deepseekModel = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
 const adminClerkUserId = process.env.ADMIN_CLERK_USER_ID?.trim() ?? '';
+const e2eTraceEnabled = process.env.E2E_TRACE_ENABLED === 'true';
 const ephemeralTestEnabled = process.env.ENABLE_EPHEMERAL_TEST_ACCOUNT === 'true';
 const ephemeralTestEmail = process.env.EPHEMERAL_TEST_EMAIL?.trim().toLowerCase() ?? '';
 const ephemeralTestPassword = process.env.EPHEMERAL_TEST_PASSWORD ?? '';
@@ -47,6 +48,30 @@ const clerk = createClerkClient({
   secretKey: clerkSecretKey,
   ...(clerkPublishableKey ? { publishableKey: clerkPublishableKey } : {}),
 });
+
+if (e2eTraceEnabled) {
+  app.addHook('onRequest', async (request) => {
+    const runId = request.headers['x-e2e-run-id'];
+    if (typeof runId === 'string' && runId.length > 0 && runId.length <= 120) {
+      request.e2eRunId = runId;
+      request.e2eStartedAt = Date.now();
+    }
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    if (!request.e2eRunId) return;
+    request.log.info({
+      e2eRunId: request.e2eRunId,
+      method: request.method,
+      endpoint: request.routeOptions?.url ?? request.url,
+      status: reply.statusCode,
+      durationMs: Date.now() - request.e2eStartedAt,
+      userId: request.userId ?? null,
+      routineId: request.e2eRoutineId ?? null,
+      synced: request.e2eSynced ?? null,
+    }, 'E2E request trace');
+  });
+}
 
 const bootstrapTables = [
   'coach',
@@ -3060,6 +3085,7 @@ app.post('/v1/routines/:id/complete', { preHandler: authenticate }, async (reque
 
 app.post('/v1/session/start', { preHandler: authenticate }, async (request, reply) => {
   const routineId = textValue(request.body?.routineId);
+  request.e2eRoutineId = routineId;
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a iniciar' });
 
   const routineResult = await pool.query(
@@ -3108,6 +3134,7 @@ app.post('/v1/session/start', { preHandler: authenticate }, async (request, repl
 
 app.post('/v1/session/end', { preHandler: authenticate }, async (request, reply) => {
   const routineId = textValue(request.body?.routineId);
+  request.e2eRoutineId = routineId;
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a finalizar' });
 
   const client = await pool.connect();
@@ -3165,6 +3192,7 @@ async function findOwnedRoutine(client, routineId, athleteId) {
 
 app.post('/v1/session/stop', { preHandler: authenticate }, async (request, reply) => {
   const routineId = textValue(request.body?.routineId);
+  request.e2eRoutineId = routineId;
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a detener' });
 
   const client = await pool.connect();
@@ -3205,6 +3233,7 @@ app.post('/v1/session/stop', { preHandler: authenticate }, async (request, reply
 
 app.post('/v1/session/cancel', { preHandler: authenticate }, async (request, reply) => {
   const routineId = textValue(request.body?.routineId);
+  request.e2eRoutineId = routineId;
   if (!routineId) return reply.code(400).send({ error: 'Falta la rutina a cancelar' });
 
   const client = await pool.connect();
@@ -3397,6 +3426,98 @@ app.put('/v1/profile', { preHandler: authenticate }, async (request, reply) => {
   );
 
   return reply.send({ ok: true });
+});
+
+app.post('/v1/session/sync', { preHandler: authenticate }, async (request, reply) => {
+  const body = request.body ?? {};
+  const sessionId = textValue(body.sessionId);
+  const routineId = textValue(body.routineId);
+  request.e2eRoutineId = routineId;
+  const inputSets = Array.isArray(body.sets) ? body.sets : null;
+
+  if (!sessionId || sessionId.length > 160 || !routineId || !inputSets || inputSets.length > 500) {
+    return reply.code(400).send({ error: 'Invalid session batch' });
+  }
+
+  const sets = [];
+  const keys = new Set();
+  for (const item of inputSets) {
+    const exerciseId = typeof item?.exerciseId === 'string' ? item.exerciseId.trim() : '';
+    const setIndex = Number(item?.setIndex);
+    const reps = Number(item?.reps);
+    const load = item?.load == null || item.load === '' ? null : Number(item.load);
+    const key = `${exerciseId}:${setIndex}`;
+    if (
+      !exerciseId ||
+      !Number.isInteger(setIndex) ||
+      setIndex < 0 ||
+      !Number.isInteger(reps) ||
+      reps <= 0 ||
+      (load !== null && !Number.isFinite(load)) ||
+      keys.has(key)
+    ) {
+      return reply.code(400).send({ error: 'Invalid or duplicated set in session batch' });
+    }
+    keys.add(key);
+    sets.push({ exerciseId, setIndex, load, reps });
+  }
+
+  request.e2eSynced = sets.length;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const routine = await client.query(
+      `SELECT id, completed_at
+         FROM routine
+        WHERE id = $1 AND athlete_id = $2
+        FOR UPDATE`,
+      [routineId, request.userId],
+    );
+    if (!routine.rows[0]) {
+      await client.query('ROLLBACK');
+      return reply.code(404).send({ error: 'No encontramos esa rutina' });
+    }
+    if (routine.rows[0].completed_at) {
+      await client.query('ROLLBACK');
+      return reply.code(409).send({ error: 'Esta rutina ya fue completada' });
+    }
+
+    if (sets.length) {
+      const exerciseIds = [...new Set(sets.map((item) => item.exerciseId))];
+      const ownership = await client.query(
+        `SELECT exercise_id
+           FROM routine_exercise
+          WHERE routine_id = $1 AND exercise_id = ANY($2::text[])`,
+        [routineId, exerciseIds],
+      );
+      const ownedIds = new Set(ownership.rows.map((row) => row.exercise_id));
+      if (ownedIds.size !== exerciseIds.length) {
+        await client.query('ROLLBACK');
+        return reply.code(404).send({ error: 'Uno de los ejercicios no pertenece a esa rutina' });
+      }
+
+      for (const item of sets) {
+        await client.query(
+          `INSERT INTO set_log (clerk_user_id, routine_id, session_id, exercise_id, set_index, load, reps)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (clerk_user_id, session_id, routine_id, exercise_id, set_index)
+           WHERE session_id IS NOT NULL
+           DO UPDATE SET load = EXCLUDED.load, reps = EXCLUDED.reps
+           `,
+          [request.userId, routineId, sessionId, item.exerciseId, item.setIndex, item.load, item.reps],
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    return reply.send({ ok: true, routineId, sessionId, synced: sets.length });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ error, routineId, sessionId }, 'Session batch sync failed');
+    return reply.code(500).send({ error: 'No pudimos sincronizar las series' });
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/v1/set-logs', { preHandler: authenticate }, async (request, reply) => {

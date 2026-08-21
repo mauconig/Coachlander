@@ -8,6 +8,13 @@ export type LoggedSet = {
   reps: number | null;
 };
 
+export type LoggedSessionSet = {
+  exerciseId: string;
+  setIndex: number;
+  load: number | null;
+  reps: number;
+};
+
 export type SessionState = {
   exIndex: number;
   elapsed: number;
@@ -18,6 +25,8 @@ export type SessionState = {
   updatedAt: number;
   phaseDuration: number;
   sets: LoggedSet[];
+  /** Series confirmadas durante toda la sesión, conservadas al cambiar de ejercicio. */
+  loggedSets: LoggedSessionSet[];
   sheet: number | null;
   keypad: boolean;
   typed: string;
@@ -35,7 +44,7 @@ export type SessionAction =
   | { type: 'tick'; work: number; now: number }
   | { type: 'cta'; work: number; now: number }
   | { type: 'goto'; index: number; exercises: Exercise[]; now: number }
-  | { type: 'log'; index: number; load: number | null; reps: number; rest: number; now: number }
+  | { type: 'log'; exerciseId: string; index: number; load: number | null; reps: number; rest: number; now: number }
   | { type: 'openKeypad' }
   | { type: 'closeSheet'; now: number }
   | { type: 'press'; key: string }
@@ -90,6 +99,7 @@ export function createInitialSessionState(exercises: Exercise[], now = Date.now(
     updatedAt: now,
     phaseDuration: COUNTDOWN_SECONDS,
     sets: emptySets(exercises[0]?.sets ?? 0),
+    loggedSets: [],
     sheet: null,
     keypad: false,
     typed: '',
@@ -158,9 +168,22 @@ export function reduceSessionState(state: SessionState, action: SessionAction): 
       const sets = state.sets.map((item, index) =>
         index === action.index ? { done: true, load: action.load, reps: action.reps } : item,
       );
+      const loggedSets = [...(state.loggedSets ?? [])];
+      const loggedIndex = loggedSets.findIndex(
+        (item) => item.exerciseId === action.exerciseId && item.setIndex === action.index,
+      );
+      const entry = {
+        exerciseId: action.exerciseId,
+        setIndex: action.index,
+        load: action.load,
+        reps: action.reps,
+      };
+      if (loggedIndex >= 0) loggedSets[loggedIndex] = entry;
+      else loggedSets.push(entry);
       const base = resumeClock({
         ...state,
         sets,
+        loggedSets,
         completedSets: (state.completedSets ?? 0) + (wasDone ? 0 : 1),
         sheet: null,
         keypad: false,

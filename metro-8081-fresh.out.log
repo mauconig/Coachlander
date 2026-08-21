@@ -191,3 +191,9 @@ Call Stack
   WithDevTools (node_modules\expo\src\launch\withDevTools.tsx:21:12)
  WARN  [Coachlander] No se pudo cargar el backend [ApiError: Invalid session]
  WARN  [Coachlander] No se pudo cargar el backend [ApiError: Invalid session]
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded
+✅ Clerk iOS plugin loaded
+✅ Clerk Android plugin loaded

@@ -7,7 +7,7 @@ import { Image } from 'expo-image';
 import { PanResponder, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
-import { cancelSession, endSession, pushSetLog, startSession, stopSession } from '@/api/client';
+import { cancelSession, endSession, startSession, stopSession, syncSessionSets } from '@/api/client';
 import { Card } from '@/components/Card';
 import { Icon, type IconName } from '@/components/Icon';
 import { ProgressBar } from '@/components/Progress';
@@ -33,14 +33,6 @@ const KEY_ROWS = [
 type ClosingAction = 'finish' | 'stop' | 'cancel' | null;
 type Confirmation = Exclude<ClosingAction, 'finish' | null> | null;
 
-type SetLogPayload = {
-  routineId: string;
-  exerciseId: string;
-  setIndex: number;
-  load: number | null;
-  reps: number;
-};
-
 function PlayerAction({
   icon,
   label,
@@ -58,6 +50,7 @@ function PlayerAction({
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label}
+      testID={`session-action-${label.toLowerCase()}`}
       accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [
         styles.playerAction,
@@ -94,8 +87,6 @@ export default function LiveSession() {
   const [closingAction, setClosingAction] = useState<ClosingAction>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const startRequestRef = useRef<{ routineId: string; promise: Promise<void> } | null>(null);
-  const pendingSetLogsRef = useRef(new Map<string, SetLogPayload>());
-  const inFlightSetLogsRef = useRef(new Set<Promise<unknown>>());
 
   const session = useSession(routine.exercises, {
     enabled: !closingAction,
@@ -103,24 +94,6 @@ export default function LiveSession() {
     estimatedMinutes: routine.estimatedMinutes,
     routineId: routine.id,
     routineTitle: `${routine.block} · ${routine.name}`,
-    onSetLogged: (entry) => {
-      const payload = { routineId: routine.id, ...entry };
-      const key = `${entry.exerciseId}:${entry.setIndex}`;
-      pendingSetLogsRef.current.set(key, payload);
-      const request = pushSetLog(getToken, payload);
-      inFlightSetLogsRef.current.add(request);
-      void request
-        .then(() => {
-          if (pendingSetLogsRef.current.get(key) === payload) pendingSetLogsRef.current.delete(key);
-          return refreshRemoteData().catch((refreshError: unknown) => {
-            console.warn('[Coachlander] No se pudo refrescar después de guardar la serie', refreshError);
-          });
-        })
-        .catch((error: unknown) => {
-          console.warn('[Coachlander] No se pudo sincronizar la serie', error);
-        })
-        .finally(() => inFlightSetLogsRef.current.delete(request));
-    },
   });
   const exerciseRepsLabel = repsLabelFromScheme(session.exercise.scheme, session.reps);
 
@@ -163,19 +136,15 @@ export default function LiveSession() {
     setMediaFailed(false);
   }, [session.exercise.id]);
 
-  const waitForSetRequests = async () => {
-    const activeRequests = [...inFlightSetLogsRef.current];
-    if (activeRequests.length) await Promise.allSettled(activeRequests);
-  };
-
-  const flushPendingSetLogs = async () => {
-    await waitForSetRequests();
-    const pending = [...pendingSetLogsRef.current.entries()];
-    if (!pending.length) return;
-    await Promise.all(pending.map(async ([key, payload]) => {
-      await pushSetLog(getToken, payload);
-      if (pendingSetLogsRef.current.get(key) === payload) pendingSetLogsRef.current.delete(key);
-    }));
+  const syncLocalSetLogs = async () => {
+    if (!session.loggedSets.length) return;
+    const sessionId = session.runtime?.sessionId;
+    if (!sessionId) throw new Error('No encontramos la sesión local para sincronizar');
+    await syncSessionSets(getToken, {
+      sessionId,
+      routineId: routine.id,
+      sets: session.loggedSets,
+    });
   };
 
   const ensureRemoteStarted = async () => {
@@ -212,7 +181,7 @@ export default function LiveSession() {
     setActionError(null);
     try {
       await ensureRemoteStarted();
-      await flushPendingSetLogs();
+      await syncLocalSetLogs();
       await endSession(getToken, routine.id);
       await refreshAfterClose();
       session.finish();
@@ -239,16 +208,12 @@ export default function LiveSession() {
     try {
       const started = await ensureRemoteStarted();
       if (action === 'stop') {
-        await flushPendingSetLogs();
+        await syncLocalSetLogs();
         if (started) await stopSession(getToken, routine.id);
       } else {
-        // Wait for in-flight inserts before deleting them, otherwise a late request
-        // could recreate a set after the cancellation transaction.
-        await waitForSetRequests();
         if (started) await cancelSession(getToken, routine.id);
       }
       await refreshAfterClose();
-      pendingSetLogsRef.current.clear();
       session.discard();
       router.back();
     } catch (error) {
@@ -312,6 +277,7 @@ export default function LiveSession() {
         label={closingAction === 'finish' ? 'TERMINANDO…' : session.ctaLabel}
         onPress={onCta}
         disabled={!!closingAction}
+        testID="session-primary-cta"
         style={styles.cta}
         haptic={false}
       />
@@ -533,6 +499,7 @@ export default function LiveSession() {
           <View style={styles.confirmationActions}>
             <Button
               label="SEGUIR ENTRENANDO"
+              testID="session-stop-continue"
               variant="outline"
               size="md"
               disabled={!!closingAction}
@@ -543,6 +510,7 @@ export default function LiveSession() {
             />
             <Button
               label={closingAction === 'stop' ? 'GUARDANDO…' : 'PARAR Y GUARDAR'}
+              testID="session-stop-confirm"
               variant="violet"
               size="md"
               disabled={!!closingAction}
@@ -576,6 +544,7 @@ export default function LiveSession() {
           <View style={styles.confirmationActions}>
             <Button
               label="VOLVER"
+              testID="session-cancel-back"
               variant="outline"
               size="md"
               disabled={!!closingAction}
@@ -586,6 +555,7 @@ export default function LiveSession() {
             />
             <Button
               label={closingAction === 'cancel' ? 'CANCELANDO…' : 'CANCELAR RUTINA'}
+              testID="session-cancel-confirm"
               variant="danger"
               size="md"
               disabled={!!closingAction}
@@ -668,7 +638,7 @@ export default function LiveSession() {
           </View>
         ) : (
           <View style={styles.pickerBlock}>
-            <Card tone="violet" radius={radius.xl} padding={18} onPress={session.useSuggested}>
+            <Card testID="session-use-suggested" tone="violet" radius={radius.xl} padding={18} onPress={session.useSuggested}>
               <View style={styles.pickRow}>
                 <View style={styles.pickText}>
                   <Txt variant="label" tone={color.onViolet}>
@@ -687,6 +657,7 @@ export default function LiveSession() {
             </Card>
 
             <Card
+              testID="session-use-more"
               tone="muted"
               active
               radius={radius.xl}
@@ -710,6 +681,7 @@ export default function LiveSession() {
             </Card>
 
             <Card
+              testID="session-open-keypad"
               tone="muted"
               radius={radius.xl}
               padding={18}

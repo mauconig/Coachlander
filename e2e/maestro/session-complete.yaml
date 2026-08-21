@@ -1,0 +1,34 @@
+appId: com.coachlander.tempo
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "Hoy"
+    timeout: 15000
+- tapOn:
+    id: today-start-session
+- extendedWaitUntil:
+    visible:
+      id: session-primary-cta
+    timeout: 10000
+- assertVisible:
+    id: session-primary-cta
+- takeScreenshot: e2e-session-countdown
+- tapOn:
+    id: session-primary-cta
+- tapOn:
+    id: session-primary-cta
+- tapOn:
+    id: session-use-suggested
+- tapOn:
+    id: session-primary-cta
+- tapOn:
+    id: session-primary-cta
+- tapOn:
+    id: session-use-suggested
+- takeScreenshot: e2e-session-before-complete
+- tapOn:
+    id: session-primary-cta
+- extendedWaitUntil:
+    visible: "Hoy"
+    timeout: 15000
+- takeScreenshot: e2e-session-completed

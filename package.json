@@ -10,7 +10,18 @@
     "ios:build": "expo run:ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck"
+    "check": "npm run typecheck",
+    "e2e:deploy": "node scripts/e2e/deploy.mjs",
+    "e2e:prepare": "node scripts/e2e/db.mjs prepare",
+    "e2e:api": "node scripts/e2e/api.mjs",
+    "e2e:android": "node scripts/e2e/android.mjs",
+    "e2e:android:stop": "node scripts/e2e/android.mjs session-stop.yaml",
+    "e2e:android:cancel": "node scripts/e2e/android.mjs session-cancel.yaml",
+    "e2e:android:resume": "node scripts/e2e/android.mjs session-resume.yaml",
+    "e2e:android:auth": "maestro test e2e/maestro-optional/auth-athlete.yaml",
+    "e2e:db": "node scripts/e2e/db.mjs assert",
+    "e2e:cleanup": "node scripts/e2e/db.mjs cleanup",
+    "e2e:report": "node scripts/e2e/report.mjs"
   },
   "dependencies": {
     "@clerk/expo": "^4.3.0",

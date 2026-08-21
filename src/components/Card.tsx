@@ -27,6 +27,7 @@ type Props = {
   gap?: number;
   radius?: number;
   style?: ViewStyle;
+  testID?: string;
 };
 
 /**
@@ -43,6 +44,7 @@ export function Card({
   gap,
   radius: r = radius.xxl,
   style,
+  testID,
 }: Props) {
   const base: ViewStyle = {
     padding,
@@ -58,6 +60,7 @@ export function Card({
     return (
       <Pressable
         onPress={onPress}
+        testID={testID}
         style={({ pressed }) => [base, pressed && styles.pressed, style]}
         accessibilityRole="button"
       >
@@ -66,7 +69,7 @@ export function Card({
     );
   }
 
-  return <View style={[base, style]}>{children}</View>;
+  return <View testID={testID} style={[base, style]}>{children}</View>;
 }
 
 const TONE: Record<CardTone, ViewStyle> = {

@@ -28,13 +28,6 @@ export type SessionRuntime = {
   remoteStarted: boolean;
 };
 
-type SessionCallback = (entry: {
-  exerciseId: string;
-  setIndex: number;
-  load: number | null;
-  reps: number;
-}) => void;
-
 type SessionContextValue = {
   runtime: SessionRuntime | null;
   hydrated: boolean;
@@ -42,7 +35,6 @@ type SessionContextValue = {
     routineId: string;
     routineTitle: string;
     exercises: Exercise[];
-    onSetLogged?: SessionCallback;
   }) => void;
   dispatch: (action: SessionAction) => void;
   markRemoteStarted: () => void;
@@ -128,12 +120,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [runtime, setRuntime] = useState<SessionRuntime | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [notificationsReady, setNotificationsReady] = useState(false);
-  const callbackRef = useRef<SessionCallback | undefined>(undefined);
   const runtimeRef = useRef<SessionRuntime | null>(null);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const dbReadyRef = useRef(false);
   const dbQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastPersistAtRef = useRef(0);
   runtimeRef.current = runtime;
 
   const enqueueDb = useCallback((operation: (database: SQLiteDatabase) => Promise<void>) => {
@@ -189,13 +181,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!runtime || !hydrated) return;
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    // Do not write on every 250 ms tick. The timestamp makes the next render
-    // accurate, while a one-second debounce keeps the local snapshot durable.
+    // Persist at most once per second. A debounce would never fire while the
+    // 250 ms timer is ticking, leaving the local set list vulnerable to a
+    // process kill during an active session.
+    const waitMs = Math.max(0, 1000 - (Date.now() - lastPersistAtRef.current));
     persistTimerRef.current = setTimeout(() => {
+      lastPersistAtRef.current = Date.now();
       void enqueueDb((database) => saveRuntime(database, runtime)).catch((error: unknown) =>
         console.warn('[Coachlander] SQLite no pudo guardar la sesión', error),
       );
-    }, 1000);
+    }, waitMs);
     return () => {
       if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
@@ -223,7 +218,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [runtime?.state.finished, runtime?.state.paused, runtime?.state.exIndex]);
 
   const ensureSession = useCallback<SessionContextValue['ensureSession']>((input) => {
-    callbackRef.current = input.onSetLogged;
     if (!hydrated) return;
     setRuntime((current) => {
       if (current?.routineId === input.routineId) return current;

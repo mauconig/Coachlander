@@ -238,6 +238,7 @@ export default function CreateAccount() {
                 onChangeText={(name) => patchDraft({ name })}
                 placeholder="Nombre y apellido"
                 autoCapitalize="words"
+                testID="auth-name"
               />
             ) : null}
             {!needsVerification ? (
@@ -249,11 +250,13 @@ export default function CreateAccount() {
                   placeholder="tu@mail.com"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  testID="auth-email"
                 />
                 <Field
                   label="CONTRASEÑA"
                   value={draft.password}
                   onChangeText={(password) => patchDraft({ password })}
+                  testID="auth-password"
                   secure
                   hint="Mínimo 8 caracteres"
                 />
@@ -267,6 +270,7 @@ export default function CreateAccount() {
                 keyboardType="number-pad"
                 autoCapitalize="none"
                 autoFocus
+                testID="auth-verification-code"
               />
             )}
           </View>
@@ -277,6 +281,7 @@ export default function CreateAccount() {
             <Button
               label={needsVerification ? 'Verificar email' : mode === 'sign-up' ? 'Crear cuenta' : 'Iniciar sesión'}
               disabled={!canSubmit || busy}
+              testID="auth-submit"
               onPress={() => void submit()}
             />
 

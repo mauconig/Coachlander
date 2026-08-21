@@ -57,6 +57,7 @@ export function TabBar({ state, descriptors, navigation }: TabBarProps) {
     <View>
       {showMiniSession && session && sessionExercise ? (
         <Pressable
+          testID="mini-session-player"
           style={styles.miniSession}
           onPress={() => {
             activeSession.restore();

@@ -40,12 +40,6 @@ export type UseSessionOptions = {
   estimatedMinutes?: number;
   routineId?: string;
   routineTitle?: string;
-  onSetLogged?: (entry: {
-    exerciseId: string;
-    setIndex: number;
-    load: number | null;
-    reps: number;
-  }) => void;
 };
 
 export function useSession(exercises: Exercise[], options: UseSessionOptions = {}) {
@@ -55,7 +49,6 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
     estimatedMinutes = 48,
     routineId = 'local-session',
     routineTitle = 'Rutina',
-    onSetLogged,
   } = options;
   const context = useSessionContext();
   const runtime = context.runtime?.routineId === routineId ? context.runtime : null;
@@ -65,8 +58,8 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
 
   useEffect(() => {
     if (!enabled) return;
-    context.ensureSession({ routineId, routineTitle, exercises, onSetLogged });
-  }, [context.ensureSession, enabled, exercises, onSetLogged, routineId, routineTitle]);
+    context.ensureSession({ routineId, routineTitle, exercises });
+  }, [context.ensureSession, enabled, exercises, routineId, routineTitle]);
 
   const exercise = sessionExercises[state.exIndex] ?? EMPTY_EXERCISE;
   const reps = repsOfScheme(exercise.scheme);
@@ -89,10 +82,9 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
   }, [dispatch, sessionExercises, state.exIndex]);
 
   const logSet = useCallback((index: number, load: number | null) => {
-    dispatch({ type: 'log', index, load, reps, rest: exercise.rest, now: Date.now() });
+    dispatch({ type: 'log', exerciseId: exercise.id, index, load, reps, rest: exercise.rest, now: Date.now() });
     if (state.soundEnabled) playSessionTone('set');
-    onSetLogged?.({ exerciseId: exercise.id, setIndex: index, load, reps });
-  }, [dispatch, exercise.id, exercise.rest, onSetLogged, reps, state.soundEnabled]);
+  }, [dispatch, exercise.id, exercise.rest, reps, state.soundEnabled]);
 
   const toggleQueue = useCallback(() => dispatch({ type: 'toggleQueue' }), [dispatch]);
   const openQueue = useCallback(() => dispatch({ type: 'setQueue', open: true }), [dispatch]);
@@ -164,6 +156,7 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
     totalExercises: sessionExercises.length,
     totalSets: sessionExercises.reduce((totalSets, item) => totalSets + item.sets, 0),
     completedSets: state.completedSets ?? done,
+    loggedSets: state.loggedSets ?? [],
     isLastExercise,
     remoteStarted: runtime?.remoteStarted ?? false,
     press: () => {

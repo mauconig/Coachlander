@@ -26,6 +26,7 @@ type Props = {
   multiline?: boolean;
   autoFocus?: boolean;
   style?: ViewStyle;
+  testID?: string;
 };
 
 /**
@@ -45,6 +46,7 @@ export function Field({
   multiline,
   autoFocus,
   style,
+  testID,
 }: Props) {
   const [focused, setFocused] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -58,6 +60,8 @@ export function Field({
 
       <View style={[styles.box, multiline && styles.boxMultiline, hot && styles.boxHot]}>
         <TextInput
+          testID={testID}
+          accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}

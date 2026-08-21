@@ -33,6 +33,8 @@ type Props = {
   fill?: boolean;
   style?: ViewStyle;
   haptic?: boolean;
+  testID?: string;
+  accessibilityLabel?: string;
 };
 
 const HEIGHT = { lg: 58, md: 52, sm: 44 } as const;
@@ -47,6 +49,8 @@ export function Button({
   fill,
   style,
   haptic = true,
+  testID,
+  accessibilityLabel,
 }: Props) {
   const skin = SKIN[variant];
 
@@ -62,7 +66,9 @@ export function Button({
     <Pressable
       onPress={handlePress}
       disabled={disabled}
+      testID={testID}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [
         styles.base,

@@ -289,12 +289,20 @@ CREATE TABLE IF NOT EXISTS set_log (
   id BIGSERIAL PRIMARY KEY,
   clerk_user_id TEXT NOT NULL REFERENCES app_user(clerk_user_id) ON DELETE CASCADE,
   routine_id TEXT NOT NULL,
+  session_id TEXT,
   exercise_id TEXT NOT NULL,
   set_index INTEGER NOT NULL,
   load DOUBLE PRECISION,
   reps INTEGER NOT NULL,
   logged_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE set_log
+  ADD COLUMN IF NOT EXISTS session_id TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_set_log_session_set
+  ON set_log (clerk_user_id, session_id, routine_id, exercise_id, set_index)
+  WHERE session_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_set_log_user_exercise
   ON set_log (clerk_user_id, exercise_id, logged_at);

@@ -136,7 +136,7 @@ export default function Today() {
         </View>
       ) : null}
 
-      <Card tone="violet" radius={26} padding={22} gap={16}>
+      <Card testID="today-routine-card" tone="violet" radius={26} padding={22} gap={16}>
         <View style={styles.cardHead}>
           <View style={styles.weekPill}>
             <Txt variant="label" tone={color.text} numberOfLines={1}>
@@ -163,6 +163,7 @@ export default function Today() {
 
         <Button
           label="Empezar sesión"
+          testID="today-start-session"
           icon={<Icon name="play" size={15} tone={color.ink} />}
           size="sm"
           onPress={() => router.push('/sesion')}
