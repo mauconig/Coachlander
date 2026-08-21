@@ -7,7 +7,7 @@ import { Image } from 'expo-image';
 import { PanResponder, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { Button } from '@/components/Button';
-import { cancelSession, endSession, startSession, stopSession, syncSessionSets } from '@/api/client';
+import { cancelSession, endSession, startSession, stopSession } from '@/api/client';
 import { Card } from '@/components/Card';
 import { Icon, type IconName } from '@/components/Icon';
 import { ProgressBar } from '@/components/Progress';
@@ -140,11 +140,12 @@ export default function LiveSession() {
     if (!session.loggedSets.length) return;
     const sessionId = session.runtime?.sessionId;
     if (!sessionId) throw new Error('No encontramos la sesión local para sincronizar');
-    await syncSessionSets(getToken, {
+    await session.stageSessionSync({
       sessionId,
       routineId: routine.id,
       sets: session.loggedSets,
     });
+    await session.retryPendingSessionSync(sessionId);
   };
 
   const ensureRemoteStarted = async () => {

@@ -202,6 +202,8 @@ export function useSession(exercises: Exercise[], options: UseSessionOptions = {
     togglePaused: () => dispatch({ type: 'togglePaused', now: Date.now() }),
     toggleSound: () => dispatch({ type: 'toggleSound' }),
     markRemoteStarted: context.markRemoteStarted,
+    stageSessionSync: context.stageSessionSync,
+    retryPendingSessionSync: context.retryPendingSessionSync,
     finish: context.finish,
     discard: context.discard,
   };
