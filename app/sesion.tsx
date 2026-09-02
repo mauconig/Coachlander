@@ -170,7 +170,7 @@ export default function LiveSession() {
 
   const refreshAfterClose = async () => {
     try {
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
     } catch (refreshError) {
       console.warn('[Coachlander] No se pudo refrescar la rutina tras cerrar', refreshError);
     }
@@ -579,7 +579,7 @@ export default function LiveSession() {
         >
           {session.queue.map((item) => (
             <Row
-              key={item.id}
+              key={`${item.id}-${item.index}`}
               tone={item.current ? 'surface' : 'muted'}
               active={item.current}
               left={<RowIndex n={item.index + 1} tone={item.current ? color.lime : color.violet} />}

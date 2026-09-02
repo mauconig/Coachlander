@@ -79,7 +79,7 @@ export function CoachHistoryDetailSheet({ visible, session, tokenProvider, onClo
           </View>
         ) : detail?.exercises.length ? (
           detail.exercises.map((exercise, index) => (
-            <View key={exercise.id} style={styles.exercise}>
+            <View key={`${exercise.id}-${index}`} style={styles.exercise}>
               <View style={styles.exerciseHeader}>
                 <View style={styles.exerciseTitle}>
                   <Txt variant="h5" numberOfLines={2}>{`${index + 1}. ${exercise.name}`}</Txt>
@@ -95,7 +95,7 @@ export function CoachHistoryDetailSheet({ visible, session, tokenProvider, onClo
 
               {exercise.sets.length ? (
                 exercise.sets.map((set) => (
-                  <View key={`${exercise.id}-${set.setIndex}`} style={styles.setRow}>
+                  <View key={`${exercise.id}-${index}-${set.setIndex}`} style={styles.setRow}>
                     <Txt variant="labelTight" tone={color.textFaint}>{`SERIE ${set.setIndex}`}</Txt>
                     <Txt variant="bodyStrong">{`${weight(set.load)} · ${set.reps} reps`}</Txt>
                   </View>

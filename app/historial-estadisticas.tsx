@@ -152,7 +152,7 @@ export default function CoachTrainingHistory() {
               {selectedDayActivity ? <Txt variant="meta" tone={color.textMuted}>{`${selectedDayActivity.sessions} sesiones realizadas · ${selectedDayActivity.minutes} min estimados`}</Txt> : null}
               {selectedDaySessions.length ? selectedDaySessions.map((session, index) => (
                 <CoachHistoryRow
-                  key={session.id}
+                  key={`${session.id}-${index}`}
                   session={session}
                   showClient={!clientId}
                   latest={index === 0}

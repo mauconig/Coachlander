@@ -71,7 +71,7 @@ export default function TemplateDetail() {
               setError('');
               try {
                 await deleteTemplate(getToken, template.id);
-                await refreshRemoteData();
+                await refreshRemoteData({ force: true });
                 router.replace('/rutinas');
               } catch (deleteError: unknown) {
                 setError(deleteError instanceof Error ? deleteError.message : 'No pudimos eliminar la plantilla.');
@@ -127,7 +127,7 @@ export default function TemplateDetail() {
               </View>
               {day.exercises.map((exercise, index) => (
                 <Row
-                  key={exercise.id}
+                  key={`${exercise.id}-${index}`}
                   left={<Txt variant="labelTight" tone={color.lime}>{String(index + 1).padStart(2, '0')}</Txt>}
                   title={exercise.name}
                   titleNumberOfLines={2}
@@ -201,7 +201,7 @@ function AssignTemplateSheet({
         weekStart: week.weekStart,
         replace: true,
       });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       onClose();
     } catch (saveError: unknown) {
       setError(saveError instanceof Error ? saveError.message : 'No pudimos asignar la rutina.');

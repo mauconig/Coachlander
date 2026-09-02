@@ -40,7 +40,7 @@ export default function Today() {
     setSelectionError('');
     try {
       await selectCurrentRoutine(getToken, routineId);
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
     } catch (error: unknown) {
       setSelectionError(error instanceof Error ? error.message : 'No pudimos seleccionar la rutina.');
     } finally {
@@ -176,7 +176,7 @@ export default function Today() {
 
         {routine.exercises.map((exercise, i) => (
           <Row
-            key={exercise.id}
+            key={`${exercise.id}-${i}`}
             left={<RowIndex n={i + 1} />}
             title={exercise.name}
             meta={`${exercise.scheme} · ${weight(exercise.suggested, unit)}`}

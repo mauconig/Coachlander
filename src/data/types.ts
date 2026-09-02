@@ -75,6 +75,7 @@ export type AthleteProgressPoint = {
   loadKg: number | null;
   reps: number | null;
   meetsTarget: boolean;
+  status: 'completed' | 'partial';
 };
 
 export type AthleteExerciseProgress = {

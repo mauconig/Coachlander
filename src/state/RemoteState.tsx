@@ -6,10 +6,15 @@ export type RemoteData = {
   tables: RemoteBootstrap['tables'];
 };
 
+export type RefreshOptions = {
+  force?: boolean;
+  maxAgeMs?: number;
+};
+
 export const emptyRemoteData: RemoteData = { user: null, tables: {} };
 
 export const RemoteDataContext = createContext<RemoteData | null>(null);
-export const RemoteRefreshContext = createContext<(() => Promise<void>) | null>(null);
+export const RemoteRefreshContext = createContext<((options?: RefreshOptions) => Promise<void>) | null>(null);
 
 export function useRemoteData(): RemoteData {
   const data = useContext(RemoteDataContext);
@@ -17,7 +22,7 @@ export function useRemoteData(): RemoteData {
   return data;
 }
 
-export function useRefreshRemoteData(): () => Promise<void> {
+export function useRefreshRemoteData(): (options?: RefreshOptions) => Promise<void> {
   const refresh = useContext(RemoteRefreshContext);
   if (!refresh) throw new Error('useRefreshRemoteData debe usarse dentro de <AppStateProvider>');
   return refresh;

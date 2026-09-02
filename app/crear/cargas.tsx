@@ -149,7 +149,7 @@ export default function CoachLoadAssignment() {
         weekStart,
         replace: true,
       });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       reset();
       if (returnTo === 'template' || returnTo === 'client' || returnTo === 'routine') {
         router.back();

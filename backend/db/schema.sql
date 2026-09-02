@@ -122,6 +122,9 @@ ALTER TABLE routine
 ALTER TABLE routine
   ADD COLUMN IF NOT EXISTS session_ended_at TIMESTAMPTZ;
 
+CREATE INDEX IF NOT EXISTS idx_routine_coach_id
+  ON routine (coach_id);
+
 UPDATE routine
    SET session_status = 'completed'
  WHERE completed_at IS NOT NULL
@@ -162,6 +165,9 @@ ALTER TABLE client
 
 ALTER TABLE client
   ADD COLUMN IF NOT EXISTS clerk_user_id TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_client_clerk_user_id
+  ON client (clerk_user_id);
 
 CREATE TABLE IF NOT EXISTS session (
   id TEXT PRIMARY KEY,
@@ -306,6 +312,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_set_log_session_set
 
 CREATE INDEX IF NOT EXISTS idx_set_log_user_exercise
   ON set_log (clerk_user_id, exercise_id, logged_at);
+
+CREATE INDEX IF NOT EXISTS idx_set_log_routine
+  ON set_log (routine_id, logged_at);
 
 CREATE TABLE IF NOT EXISTS client_exercise_goal (
   client_id TEXT NOT NULL REFERENCES client(id) ON DELETE CASCADE,

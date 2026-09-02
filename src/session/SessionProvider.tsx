@@ -83,6 +83,12 @@ export async function initializeSessionDatabase(db: SQLiteDatabase) {
     );
     CREATE INDEX IF NOT EXISTS idx_pending_session_events_retry
       ON pending_session_events (session_id, event_type, synced);
+    CREATE TABLE IF NOT EXISTS bootstrap_cache (
+      user_id TEXT PRIMARY KEY NOT NULL,
+      schema_version INTEGER NOT NULL,
+      payload_json TEXT NOT NULL,
+      cached_at INTEGER NOT NULL
+    );
   `);
 }
 

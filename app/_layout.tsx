@@ -1,16 +1,12 @@
 import { ClerkProvider } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import {
-  Archivo_500Medium,
-  Archivo_600SemiBold,
   Archivo_700Bold,
   Archivo_800ExtraBold,
-  Archivo_900Black,
   useFonts,
 } from '@expo-google-fonts/archivo';
 import {
   SpaceGrotesk_400Regular,
-  SpaceGrotesk_500Medium,
   SpaceGrotesk_600SemiBold,
   SpaceGrotesk_700Bold,
 } from '@expo-google-fonts/space-grotesk';
@@ -50,13 +46,9 @@ const navTheme = {
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    Archivo_500Medium,
-    Archivo_600SemiBold,
     Archivo_700Bold,
     Archivo_800ExtraBold,
-    Archivo_900Black,
     SpaceGrotesk_400Regular,
-    SpaceGrotesk_500Medium,
     SpaceGrotesk_600SemiBold,
     SpaceGrotesk_700Bold,
     SpaceMono_400Regular,

@@ -52,7 +52,7 @@ export default function CoachProfile() {
         firstName: nextName.split(/\s+/)[0] ?? nextName,
         role: 'coach',
       });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       setEditVisible(false);
     } catch (error: unknown) {
       Alert.alert('No pudimos guardar el perfil', error instanceof Error ? error.message : 'Probá nuevamente.');

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 import cors from '@fastify/cors';
+import compress from '@fastify/compress';
 import Fastify from 'fastify';
 import { createClerkClient } from '@clerk/backend';
 import pg from 'pg';
@@ -38,6 +39,9 @@ const exerciseCatalogRequiredFields = [
   'image_url',
   'gif_url',
 ];
+
+let bootstrapCatalogById = new Map();
+let bootstrapCatalogByName = new Map();
 
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 if (!clerkSecretKey) throw new Error('CLERK_SECRET_KEY is required');
@@ -239,6 +243,7 @@ async function ensureExerciseCatalog() {
       [JSON.stringify(catalog)],
     );
     await client.query('COMMIT');
+    rebuildBootstrapCatalogIndex(catalog);
     app.log.info({ count: catalog.length }, 'Exercise catalog replaced');
   } catch (error) {
     await client.query('ROLLBACK');
@@ -264,30 +269,21 @@ async function authenticate(request, reply) {
     const auth = requestState.toAuth();
     if (!auth.isAuthenticated) return reply.code(401).send({ error: 'Invalid session' });
     request.userId = auth.userId;
+    request.auth = auth;
+    request.authClaims = auth.sessionClaims ?? {};
   } catch (error) {
     request.log.warn({ error }, 'Clerk authentication failed');
     return reply.code(401).send({ error: 'Invalid session' });
   }
 }
 
-async function ensureUser(userId) {
-  let email = null;
-  let displayName = null;
-  let firstName = null;
-
-  try {
-    const clerkUser = await clerk.users.getUser(userId);
-    email = clerkUser.primaryEmailAddress?.emailAddress ?? clerkUser.emailAddresses?.[0]?.emailAddress ?? null;
-    const metadataDisplayName =
-      typeof clerkUser.unsafeMetadata?.displayName === 'string'
-        ? clerkUser.unsafeMetadata.displayName.trim() || null
-        : null;
-    firstName = clerkUser.firstName?.trim() || metadataDisplayName?.split(/\s+/)[0] || null;
-    const lastName = clerkUser.lastName?.trim() || null;
-    displayName = [clerkUser.firstName?.trim(), lastName].filter(Boolean).join(' ') || metadataDisplayName;
-  } catch (error) {
-    app.log.warn({ error, userId }, 'Could not load Clerk user profile');
-  }
+async function ensureUser(userId, claims = {}) {
+  const email = typeof claims.email === 'string'
+    ? claims.email
+    : typeof claims.email_address === 'string' ? claims.email_address : null;
+  const firstName = typeof claims.first_name === 'string' ? claims.first_name.trim() || null : null;
+  const lastName = typeof claims.last_name === 'string' ? claims.last_name.trim() || null : null;
+  const displayName = [firstName, lastName].filter(Boolean).join(' ') || null;
 
   const result = await pool.query(
     `INSERT INTO app_user (clerk_user_id, email, display_name, first_name)
@@ -482,6 +478,35 @@ function findCatalogMatchByName(catalogRows, name, { allowFuzzy = false } = {}) 
   return allowFuzzy ? findFuzzyCatalogMatch(catalogRows, name) : null;
 }
 
+function rebuildBootstrapCatalogIndex(catalog) {
+  bootstrapCatalogById = new Map(catalog.map((row) => [String(row.id), row]));
+  bootstrapCatalogByName = new Map();
+  for (const row of catalog) {
+    for (const value of [row.name_es, row.name_en]) {
+      const normalized = normalizeName(value);
+      if (normalized && !bootstrapCatalogByName.has(normalized)) bootstrapCatalogByName.set(normalized, row);
+    }
+  }
+  for (const [alias, names] of Object.entries(catalogAliasMap)) {
+    for (const name of names) {
+      const row = bootstrapCatalogByName.get(normalizeName(name));
+      if (row) bootstrapCatalogByName.set(alias, row);
+    }
+  }
+  for (const [alias, id] of Object.entries(importedCatalogIdAliases)) {
+    const row = bootstrapCatalogById.get(String(id));
+    if (row) bootstrapCatalogByName.set(alias, row);
+  }
+}
+
+function findBootstrapCatalogMatch(exercise) {
+  if (exercise.catalog_id) {
+    const byId = bootstrapCatalogById.get(String(exercise.catalog_id));
+    if (byId) return byId;
+  }
+  return bootstrapCatalogByName.get(normalizeName(exercise.name)) ?? null;
+}
+
 async function resolveImportedCatalogExercises(queryable, days) {
   const result = await queryable.query(
     `SELECT id, name_en, name_es, body_part_es, equipment_es, target_es,
@@ -510,16 +535,10 @@ async function resolveImportedCatalogExercises(queryable, days) {
 
 async function enrichBootstrapExercises(exercises) {
   if (!exercises.length) return exercises;
-  const result = await pool.query(
-    `SELECT id, name_en, name_es, body_part_es, equipment_es, target_es,
-            secondary_muscles_es, muscle_groups, instructions_es,
-            instruction_steps_es, image_url, gif_url, attribution
-       FROM exercise_catalog`,
-  );
-  if (!result.rows.length) return exercises;
+  if (!bootstrapCatalogById.size) return exercises;
 
   return exercises.map((exercise) => {
-    const catalog = findCatalogMatchByName(result.rows, exercise.name);
+    const catalog = findBootstrapCatalogMatch(exercise);
     if (!catalog) return exercise;
     return {
       ...exercise,
@@ -541,42 +560,95 @@ async function enrichBootstrapExercises(exercises) {
 }
 
 async function requireCatalogAccess(request, reply) {
-  const profile = await ensureUser(request.userId);
+  const profile = await ensureUser(request.userId, request.authClaims);
   if (profile.role === 'coach' || (profile.role === 'athlete' && profile.solo_training)) return profile;
   reply.code(403).send({ error: 'Esta biblioteca sólo está disponible para entrenadores y atletas independientes' });
   return null;
 }
 
-async function readBootstrap(userId) {
-  const user = await ensureUser(userId);
-  const tables = {};
+async function readBootstrap(userId, claims = {}) {
+  const startedAt = performance.now();
+  const databaseStartedAt = performance.now();
+  const user = await ensureUser(userId, claims);
+  const tables = Object.fromEntries(bootstrapTables.map((table) => [table, []]));
 
-  for (const table of bootstrapTables) {
-    if (table === 'set_log') {
-      const result = await pool.query(
+  if (user.role === 'athlete') {
+    const [routineResult, clientResult, setLogResult, goalResult] = await Promise.all([
+      pool.query('SELECT * FROM routine WHERE athlete_id = $1 ORDER BY id', [userId]),
+      pool.query('SELECT * FROM client WHERE clerk_user_id = $1 ORDER BY position', [userId]),
+      pool.query(
         `SELECT id, routine_id, exercise_id, set_index, load, reps, logged_at
          FROM set_log WHERE clerk_user_id = $1 ORDER BY logged_at DESC, id DESC`,
         [userId],
-      );
-      tables[table] = result.rows;
-      continue;
-    }
-
-    if (table === 'client_exercise_goal') {
-      const result = await pool.query(
+      ),
+      pool.query(
         `SELECT goal.*
          FROM client_exercise_goal goal
          JOIN client c ON c.id = goal.client_id
          WHERE c.clerk_user_id = $1
          ORDER BY goal.exercise_key`,
         [userId],
-      );
-      tables[table] = result.rows;
-      continue;
-    }
-
-    const result =
-      table === 'template'
+      ),
+    ]);
+    const routineIds = routineResult.rows.map((row) => row.id);
+    const routineExerciseResult = routineIds.length
+      ? await pool.query(
+          `SELECT * FROM routine_exercise
+           WHERE routine_id = ANY($1::text[])
+           ORDER BY position`,
+          [routineIds],
+        )
+      : { rows: [] };
+    const exerciseIds = [...new Set(routineExerciseResult.rows.map((row) => row.exercise_id))];
+    const [exerciseResult, overloadResult, coachResult, appMetaResult, settingResult] = await Promise.all([
+      exerciseIds.length
+        ? pool.query(`SELECT * FROM exercise WHERE id = ANY($1::text[]) ORDER BY id`, [exerciseIds])
+        : { rows: [] },
+      exerciseIds.length
+        ? pool.query(
+            `SELECT * FROM overload_row WHERE exercise_id = ANY($1::text[]) ORDER BY exercise_id, set_no`,
+            [exerciseIds],
+          )
+        : { rows: [] },
+      routineResult.rows.length
+        ? pool.query(
+            `SELECT * FROM coach WHERE id = ANY($1::text[]) ORDER BY id`,
+            [[...new Set(routineResult.rows.map((row) => row.coach_id).filter(Boolean))]],
+          )
+        : { rows: [] },
+      pool.query('SELECT * FROM app_meta ORDER BY key'),
+      pool.query(`SELECT * FROM setting WHERE role = 'athlete' ORDER BY position, id`),
+    ]);
+    tables.routine = routineResult.rows;
+    tables.routine_exercise = routineExerciseResult.rows;
+    tables.exercise = await enrichBootstrapExercises(exerciseResult.rows);
+    tables.overload_row = overloadResult.rows;
+    tables.client = clientResult.rows;
+    tables.set_log = setLogResult.rows;
+    tables.client_exercise_goal = goalResult.rows;
+    tables.coach = coachResult.rows;
+    tables.app_meta = appMetaResult.rows;
+    tables.setting = settingResult.rows;
+  } else {
+    const results = await Promise.all(bootstrapTables.map(async (table) => {
+      if (table === 'set_log') {
+        return [table, (await pool.query(
+          `SELECT id, routine_id, exercise_id, set_index, load, reps, logged_at
+           FROM set_log WHERE clerk_user_id = $1 ORDER BY logged_at DESC, id DESC`,
+          [userId],
+        )).rows];
+      }
+      if (table === 'client_exercise_goal') {
+        return [table, (await pool.query(
+          `SELECT goal.*
+           FROM client_exercise_goal goal
+           JOIN client c ON c.id = goal.client_id
+           WHERE c.clerk_user_id = $1
+           ORDER BY goal.exercise_key`,
+          [userId],
+        )).rows];
+      }
+      const result = table === 'template'
         ? await pool.query(
             `SELECT t.*
              FROM template t
@@ -585,8 +657,16 @@ async function readBootstrap(userId) {
              ORDER BY t.position`,
           )
         : await pool.query(`SELECT * FROM ${quoteIdentifier(table)} ORDER BY ${orderBy[table] ?? '1'}`);
-    tables[table] = table === 'exercise' ? await enrichBootstrapExercises(result.rows) : result.rows;
+      return [table, table === 'exercise' ? await enrichBootstrapExercises(result.rows) : result.rows];
+    }));
+    for (const [table, rows] of results) tables[table] = rows;
   }
+
+  app.log.info({
+    durationMs: Math.round(performance.now() - startedAt),
+    databaseMs: Math.round(performance.now() - databaseStartedAt),
+    rows: Object.fromEntries(Object.entries(tables).map(([name, rows]) => [name, rows.length])),
+  }, 'Bootstrap ready');
 
   return {
     user: {
@@ -602,10 +682,12 @@ async function readBootstrap(userId) {
       isAdmin: Boolean(adminClerkUserId && user.clerk_user_id === adminClerkUserId),
     },
     tables,
+    meta: { version: 1, generatedAt: new Date().toISOString() },
   };
 }
 
 app.register(cors, { origin: true });
+app.register(compress, { global: true, threshold: 1024 });
 
 app.get('/healthz', async () => {
   await pool.query('SELECT 1');
@@ -613,7 +695,11 @@ app.get('/healthz', async () => {
 });
 
 app.get('/v1/bootstrap', { preHandler: authenticate }, async (request) => {
-  return readBootstrap(request.userId);
+  const payload = await readBootstrap(request.userId, request.authClaims);
+  request.log.info({
+    payloadBytes: Buffer.byteLength(JSON.stringify(payload), 'utf8'),
+  }, 'Bootstrap payload');
+  return payload;
 });
 
 app.get('/v1/exercise-catalog/muscles', { preHandler: authenticate }, async (request, reply) => {

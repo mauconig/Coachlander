@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import type { CoachHeatmapItem, CoachHistorySession, CoachWeeklyActivity } from '@/api/client';
+import { AthleteHistoryDetailSheet } from '@/components/AthleteHistoryDetailSheet';
 import { Card } from '@/components/Card';
 import { CoachHistoryCalendar } from '@/components/CoachHistoryCalendar';
 import { CoachHistoryRow } from '@/components/CoachHistoryRow';
@@ -13,6 +14,7 @@ import { getHistory } from '@/db/queries';
 import { useQuery } from '@/db/useQuery';
 import { currentMonthKey, displayDate, displayMonth, shiftMonth } from '@/lib/stats';
 import { useRefreshRemoteData } from '@/state/RemoteState';
+import { useApp } from '@/state/AppState';
 import { color } from '@/theme/tokens';
 
 function dateKey(date: Date): string {
@@ -97,10 +99,12 @@ function toCoachSession(session: SessionRecord): CoachHistorySession {
 
 /** Historial del atleta: comparte el calendario mensual y la navegación del coach. */
 export default function History() {
+  const { unit } = useApp();
   const history = useQuery(getHistory);
   const refreshRemoteData = useRefreshRemoteData();
   const [month, setMonth] = useState(() => currentMonthKey());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<SessionRecord | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -125,6 +129,7 @@ export default function History() {
   }, []);
 
   return (
+    <>
     <Screen scroll gap={16}>
       <View style={styles.heading}>
         <Txt variant="h2">Historial</Txt>
@@ -152,10 +157,14 @@ export default function History() {
           ) : null}
           {selectedDaySessions.length ? selectedDaySessions.map((session, index) => (
             <CoachHistoryRow
-              key={session.id}
+              key={`${session.id}-${index}`}
               session={session}
               showClient={false}
               latest={index === 0}
+              onPress={() => {
+                const source = history.find((item) => item.id === session.id);
+                if (source) setSelectedSession(source);
+              }}
             />
           )) : (
             <Card tone="muted" padding={16}>
@@ -175,6 +184,13 @@ export default function History() {
         </Card>
       ) : null}
     </Screen>
+      <AthleteHistoryDetailSheet
+        visible={!!selectedSession}
+        session={selectedSession}
+        unit={unit}
+        onClose={() => setSelectedSession(null)}
+      />
+    </>
   );
 }
 

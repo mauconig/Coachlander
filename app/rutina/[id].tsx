@@ -261,7 +261,7 @@ export default function RoutineDetail() {
     setError('');
     try {
       await updateRoutine(getToken, routine.id, routinePayload(exercises));
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       setEditingId(null);
     } catch (saveError: unknown) {
       setError(saveError instanceof Error ? saveError.message : 'No pudimos guardar la rutina.');
@@ -296,7 +296,7 @@ export default function RoutineDetail() {
         weekStart,
         replace: true,
       });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       setChangeOpen(false);
       setPendingTemplateId(null);
       router.back();
@@ -391,7 +391,7 @@ export default function RoutineDetail() {
         <View style={styles.list}>
           {exercises.map((exercise, index) => (
             <ExerciseRow
-              key={exercise.id}
+              key={`${exercise.id}-${index}`}
               exercise={exercise}
               index={index}
               total={exercises.length}

@@ -130,7 +130,7 @@ export default function Progress() {
                 <View style={styles.chartHeader}>
                   <View style={styles.chartTitle}>
                     <Txt variant="eyebrow">PROGRESO POR SESIÓN</Txt>
-                    <Txt variant="meta" tone={color.textMuted}>Una marca por cada rutina completada</Txt>
+                    <Txt variant="meta" tone={color.textMuted}>Una marca por cada sesión con registros</Txt>
                   </View>
                   {progress.goal ? (
                     <ChipGroup options={DISPLAY_MODES} value={displayMode} onChange={setDisplayMode} tone="violet" mono={false} />
@@ -192,7 +192,7 @@ function ScreenEmpty() {
       </View>
       <View style={styles.emptyState}>
         <Txt variant="bodyLg" tone={color.textMuted} center>
-          Cuando completes una rutina y registres tu primer set, acá vas a poder elegir un músculo y seguir tus avances.
+          Cuando registres una serie real, acá vas a poder elegir un músculo y seguir tus avances.
         </Txt>
       </View>
     </Screen>
@@ -207,7 +207,9 @@ function RecentSessions({ progress, unit }: { progress: NonNullable<ReturnType<t
         <View key={`${point.date}-${index}`} style={styles.sessionRow}>
           <View>
             <Txt variant="bodyStrong">{point.date}</Txt>
-            <Txt variant="meta" tone={color.textMuted}>{point.reps ? `${point.reps} reps reales` : 'Sin repeticiones registradas'}</Txt>
+            <Txt variant="meta" tone={color.textMuted}>
+              {`${point.status === 'partial' ? 'Parcial · ' : ''}${point.reps ? `${point.reps} reps reales` : 'Sin repeticiones registradas'}`}
+            </Txt>
           </View>
           <Txt variant="labelTight" tone={point.value === null ? color.textMuted : color.lime}>
             {point.value === null ? 'NO ALCANZÓ' : formatValue(point.value, progress, unit)}

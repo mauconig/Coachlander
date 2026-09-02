@@ -17,6 +17,10 @@ export type RemoteBootstrap = {
     isAdmin: boolean;
   };
   tables: Record<string, Record<string, unknown>[]>;
+  meta?: {
+    version: number;
+    generatedAt: string;
+  };
 };
 
 export type SetLogInput = {
@@ -47,22 +51,38 @@ export type SaveImportedRoutineInput = {
   autoOverload: boolean;
 };
 
-const NETWORK_ATTEMPTS = 3;
+const NETWORK_ATTEMPTS = 2;
 const NETWORK_TIMEOUT_MS = 12_000;
+
+type RequestPolicy = {
+  attempts?: number;
+  timeoutMs?: number;
+  totalTimeoutMs?: number;
+};
 
 const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
-async function fetchWithNetworkRetry(url: string, init?: RequestInit) {
+async function fetchWithNetworkRetry(url: string, init?: RequestInit, policy: RequestPolicy = {}) {
   let lastError: unknown;
+  const method = init?.method ?? 'GET';
+  const attempts = policy.attempts ?? (method === 'GET' ? NETWORK_ATTEMPTS : 1);
+  const timeoutMs = policy.timeoutMs ?? NETWORK_TIMEOUT_MS;
+  const deadline = policy.totalTimeoutMs ? Date.now() + policy.totalTimeoutMs : null;
 
-  for (let attempt = 0; attempt < NETWORK_ATTEMPTS; attempt += 1) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const remaining = deadline === null ? timeoutMs : Math.min(timeoutMs, deadline - Date.now());
+    if (remaining <= 0) throw new Error('La conexión tardó demasiado');
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), remaining);
     try {
       return await fetch(url, { ...init, signal: controller.signal });
     } catch (error) {
       lastError = error;
-      if (attempt < NETWORK_ATTEMPTS - 1) await wait(700 * (attempt + 1));
+      if (attempt < attempts - 1) {
+        const backoff = 700 * (attempt + 1);
+        if (deadline !== null && Date.now() + backoff >= deadline) break;
+        await wait(backoff);
+      }
     } finally {
       clearTimeout(timeout);
     }
@@ -97,14 +117,25 @@ async function request<T>(
   tokenProvider: TokenProvider,
   path: string,
   init?: RequestInit,
+  policy: RequestPolicy = {},
 ): Promise<T> {
-  const token = await tokenProvider();
+  const startedAt = Date.now();
+  const token = policy.totalTimeoutMs
+    ? await Promise.race([
+        tokenProvider(),
+        new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error('La autenticación tardó demasiado')), policy.totalTimeoutMs),
+        ),
+      ])
+    : await tokenProvider();
   if (!token) throw new ApiError(401, 'No hay una sesión de Clerk activa');
 
-  const startedAt = Date.now();
   const method = init?.method ?? 'GET';
   let response: Response;
   try {
+    const remaining = policy.totalTimeoutMs
+      ? Math.max(1, policy.totalTimeoutMs - (Date.now() - startedAt))
+      : undefined;
     response = await fetchWithNetworkRetry(`${API_BASE_URL}${path}`, {
       ...init,
       headers: {
@@ -114,7 +145,7 @@ async function request<T>(
         ...e2eHeaders(),
         ...init?.headers,
       },
-    });
+    }, { ...policy, ...(remaining ? { totalTimeoutMs: remaining } : {}) });
   } catch (error) {
     traceApiRequest(method, path, 'network-error', startedAt);
     throw error;
@@ -183,7 +214,11 @@ export function deleteEphemeralTestAccount(tokenProvider: TokenProvider) {
 }
 
 export function getBootstrap(tokenProvider: TokenProvider) {
-  return request<RemoteBootstrap>(tokenProvider, '/v1/bootstrap');
+  return request<RemoteBootstrap>(tokenProvider, '/v1/bootstrap', undefined, {
+    attempts: 1,
+    timeoutMs: 4_500,
+    totalTimeoutMs: 5_000,
+  });
 }
 
 export type CatalogMuscle = {

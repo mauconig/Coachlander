@@ -123,7 +123,7 @@ export default function RoutineCreatorEditor() {
     <Screen gap={0}>
       <DraggableFlatList
         data={day.exercises}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
         onDragEnd={({ data }) => replaceExercises(day.day, data)}
         activationDistance={8}
         style={styles.listFlex}

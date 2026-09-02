@@ -122,7 +122,7 @@ export default function AssignCreatedRoutine() {
         days: list,
         autoOverload,
       });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       reset();
       router.dismissAll();
       router.replace('/hoy');
@@ -151,7 +151,7 @@ export default function AssignCreatedRoutine() {
           name: routineName.trim() || 'Rutina creada',
           days: list,
         });
-        await refreshRemoteData();
+        await refreshRemoteData({ force: true });
         reset();
         router.dismissAll();
         router.replace('/rutinas');
@@ -173,7 +173,7 @@ export default function AssignCreatedRoutine() {
           replace: true,
         });
       }
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       reset();
       router.dismissAll();
       router.replace('/rutinas');

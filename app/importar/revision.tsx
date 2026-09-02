@@ -79,7 +79,7 @@ export default function ImportReview() {
 
       <View style={styles.list}>
         {detected.map((item, index) => (
-          <Fragment key={item.id}>
+          <Fragment key={`${item.id}-${index}`}>
             {index === 0 || item.day !== detected[index - 1]?.day ? (
               <Txt variant="label" tone={color.lime} style={styles.dayLabel}>
                 {item.dayName ?? `DÍA ${item.day}`}
@@ -87,7 +87,7 @@ export default function ImportReview() {
             ) : null}
 
             {item.uncertain ? (
-              <Card key={item.id} active radius={radius.md} padding={16} gap={12}>
+              <Card active radius={radius.md} padding={16} gap={12}>
                 <View style={styles.questionRow}>
                   <Icon name="question" size={16} tone={color.lime} />
                   <View style={styles.questionText}>
@@ -120,7 +120,7 @@ export default function ImportReview() {
                 </Pressable>
               </Card>
             ) : (
-              <Card key={item.id} radius={radius.md} padding={14} gap={10}>
+              <Card radius={radius.md} padding={14} gap={10}>
                 <Row
                   left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
                   title={item.name}

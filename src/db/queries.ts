@@ -322,16 +322,21 @@ function consecutiveWeekCount(weeks: Set<string>): number {
 }
 
 function progressRank(routine: Row, exercise: Row): string {
-  return `${dateOnly(stringValue(routine, 'completed_at'))}-${dateOnly(stringValue(routine, 'week_start'))}-${String(numberValue(routine, 'day')).padStart(2, '0')}-${stringValue(exercise, 'id')}`;
+  const sessionDate = dateOnly(stringValue(routine, 'completed_at') || stringValue(routine, 'session_ended_at'));
+  return `${sessionDate}-${dateOnly(stringValue(routine, 'week_start'))}-${String(numberValue(routine, 'day')).padStart(2, '0')}-${stringValue(exercise, 'id')}`;
 }
 
-/** Exercises shown in athlete progress: only worked, completed snapshots. */
+/** Exercises shown in athlete progress: only worked snapshots with real sets. */
 export function getProgressExercises(data: RemoteData): AthleteProgressExercise[] {
   const athleteId = data.user?.id;
   if (!athleteId) return [];
 
   const routines = rows(data, 'routine').filter(
-    (routine) => routine.athlete_id === athleteId && Boolean(stringValue(routine, 'completed_at')),
+    (routine) =>
+      routine.athlete_id === athleteId &&
+      (Boolean(stringValue(routine, 'completed_at')) ||
+        stringValue(routine, 'session_status') === 'partial' ||
+        Boolean(stringValue(routine, 'session_ended_at'))),
   );
   const routineById = new Map(routines.map((routine) => [stringValue(routine, 'id'), routine]));
   const exerciseById = new Map(rows(data, 'exercise').map((exercise) => [stringValue(exercise, 'id'), exercise]));
@@ -364,7 +369,7 @@ export function getProgressExercises(data: RemoteData): AthleteProgressExercise[
       ...toExercise(exercise),
       key,
       sessions: routineIds.size,
-      lastDate: dateOnly(stringValue(routine, 'completed_at')),
+      lastDate: dateOnly(stringValue(routine, 'completed_at') || stringValue(routine, 'session_ended_at')),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -432,7 +437,11 @@ export function getAthleteExerciseProgress(
   if (!athleteId || !selectedKey) return null;
 
   const routines = rows(data, 'routine').filter(
-    (routine) => routine.athlete_id === athleteId && Boolean(stringValue(routine, 'completed_at')),
+    (routine) =>
+      routine.athlete_id === athleteId &&
+      (Boolean(stringValue(routine, 'completed_at')) ||
+        stringValue(routine, 'session_status') === 'partial' ||
+        Boolean(stringValue(routine, 'session_ended_at'))),
   );
   const routineById = new Map(routines.map((routine) => [stringValue(routine, 'id'), routine]));
   const exerciseById = new Map(rows(data, 'exercise').map((exercise) => [stringValue(exercise, 'id'), exercise]));
@@ -444,7 +453,7 @@ export function getAthleteExerciseProgress(
       .filter((link) => routineById.has(stringValue(link, 'routine_id')) && exerciseKeyById.get(stringValue(link, 'exercise_id')) === selectedKey)
       .map((link) => `${stringValue(link, 'routine_id')}|${stringValue(link, 'exercise_id')}`),
   );
-  const sessions = new Map<string, { date: string; logs: Row[] }>();
+  const sessions = new Map<string, { date: string; logs: Row[]; status: 'completed' | 'partial' }>();
 
   for (const log of rows(data, 'set_log')) {
     const routineId = stringValue(log, 'routine_id');
@@ -452,7 +461,11 @@ export function getAthleteExerciseProgress(
     if (!linkedPairs.has(`${routineId}|${exerciseId}`)) continue;
     const routine = routineById.get(routineId);
     if (!routine) continue;
-    const current = sessions.get(routineId) ?? { date: dateOnly(stringValue(routine, 'completed_at')), logs: [] };
+    const current = sessions.get(routineId) ?? {
+      date: dateOnly(stringValue(routine, 'completed_at') || stringValue(routine, 'session_ended_at')),
+      logs: [],
+      status: stringValue(routine, 'session_status') === 'partial' ? 'partial' : 'completed',
+    };
     current.logs.push(log);
     sessions.set(routineId, current);
   }
@@ -491,6 +504,7 @@ export function getAthleteExerciseProgress(
         loadKg: metric === 'load' && !bodyweight ? bestLoad : null,
         reps: bestReps ? numberValue(bestReps, 'reps') : null,
         meetsTarget,
+        status: session.status,
       };
     });
 
@@ -837,6 +851,61 @@ export function getHistory(data: RemoteData): SessionRecord[] {
       completion: numberValue(row, 'completion'),
       status: 'completed',
     }));
+}
+
+export type AthleteHistoryExerciseDetail = {
+  id: string;
+  name: string;
+  scheme: string;
+  plannedSets: number;
+  suggested: number;
+  loadSource: 'ai' | 'coach';
+  loadReason: string;
+  sets: SetLog[];
+};
+
+export type AthleteHistoryDetail = {
+  id: string;
+  name: string;
+  date: string;
+  minutes: number;
+  status: 'completed' | 'partial';
+  exercises: AthleteHistoryExerciseDetail[];
+};
+
+export function getAthleteHistoryDetail(data: RemoteData, routineId: string): AthleteHistoryDetail | null {
+  const routine = getRoutineById(data, routineId);
+  if (!routine) return null;
+
+  const status = routine.sessionStatus === 'partial' ? 'partial' : 'completed';
+  const logs = rows(data, 'set_log').filter((log) => stringValue(log, 'routine_id') === routineId);
+  return {
+    id: routine.id,
+    name: routine.name,
+    date: dateOnly(routine.completedAt || routine.sessionEndedAt || ''),
+    minutes: status === 'completed' ? routine.estimatedMinutes : 0,
+    status,
+    exercises: routine.exercises.map((exercise) => ({
+      id: exercise.id,
+      name: exercise.name,
+      scheme: exercise.scheme,
+      plannedSets: exercise.sets,
+      suggested: exercise.suggested,
+      loadSource: exercise.loadSource,
+      loadReason: exercise.loadReason,
+      sets: logs
+        .filter((log) => stringValue(log, 'exercise_id') === exercise.id)
+        .sort((a, b) => numberValue(a, 'set_index') - numberValue(b, 'set_index'))
+        .map((log) => ({
+          id: numberValue(log, 'id'),
+          exerciseId: exercise.id,
+          setIndex: numberValue(log, 'set_index') + 1,
+          load: nullableNumber(log, 'load'),
+          reps: numberValue(log, 'reps'),
+          loggedAt: stringValue(log, 'logged_at'),
+        })),
+    })),
+  };
 }
 
 export function getHistorySummary(data: RemoteData) {

@@ -44,7 +44,7 @@ export default function AthleteProfile() {
     setRoutineError('');
     try {
       await deleteCurrentRoutine(getToken);
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
     } catch (error: unknown) {
       setRoutineError(error instanceof Error ? error.message : 'No pudimos eliminar la rutina.');
     } finally {

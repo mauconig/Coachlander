@@ -68,7 +68,7 @@ export default function AssignRoutine() {
       });
 
       await saveImportedRoutine(getToken, { routineName, days, autoOverload });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       reset();
       router.dismissAll();
       router.replace(isCoach ? '/rutinas' : '/hoy');

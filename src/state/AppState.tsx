@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/expo';
+import { useSQLiteContext } from 'expo-sqlite';
 import {
   createContext,
   useCallback,
@@ -10,14 +11,16 @@ import {
   type ReactNode,
 } from 'react';
 
-import { deleteEphemeralTestAccount, getBootstrap, updateProfile } from '@/api/client';
+import { deleteEphemeralTestAccount, getBootstrap, updateProfile, type RemoteBootstrap } from '@/api/client';
 import { EPHEMERAL_TEST_EMAIL } from '@/config/runtime';
 import type { Role, Unit } from '@/data/types';
+import { deleteBootstrapCache, readBootstrapCache, writeBootstrapCache } from '@/state/bootstrapCache';
 import {
   emptyRemoteData,
   RemoteDataContext,
   RemoteRefreshContext,
   type RemoteData,
+  type RefreshOptions,
 } from '@/state/RemoteState';
 
 export type Experience = 'Empiezo' | '1-3 años' | '+3 años';
@@ -46,7 +49,8 @@ type AppState = {
   authReady: boolean;
   signedIn: boolean;
   remoteStatus: RemoteStatus;
-  retryRemoteData: () => Promise<void>;
+  remoteRefreshing: boolean;
+  retryRemoteData: (options?: RefreshOptions) => Promise<void>;
   role: Role;
   unit: Unit;
   draft: OnboardingDraft;
@@ -61,6 +65,7 @@ const Ctx = createContext<AppState | null>(null);
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const { getToken, isLoaded, isSignedIn, signOut: clerkSignOut, userId } = useAuth();
+  const db = useSQLiteContext();
   const emptyDraft = useMemo<OnboardingDraft>(
     () => ({
       name: '',
@@ -81,51 +86,96 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const [remoteData, setRemoteData] = useState<RemoteData>(emptyRemoteData);
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus>('idle');
+  const [remoteRefreshing, setRemoteRefreshing] = useState(false);
   const [role, setRole] = useState<Role>('athlete');
   const [draft, setDraft] = useState<OnboardingDraft>(emptyDraft);
-  const syncedUserRef = useRef<string | null>(null);
+  const initializedUserRef = useRef<string | null>(null);
+  const hasSnapshotRef = useRef(false);
+  const lastRefreshAtRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
-  const refreshRemoteData = useCallback(async () => {
+  const applySnapshot = useCallback((snapshot: RemoteBootstrap) => {
+    setRemoteData({ user: snapshot.user, tables: snapshot.tables });
+    setRole(snapshot.user.role);
+    setDraft((current) => ({
+      ...current,
+      role: snapshot.user.role,
+      name: snapshot.user.displayName ?? current.name,
+      email: snapshot.user.email ?? current.email,
+      soloTraining: snapshot.user.soloTraining,
+    }));
+    hasSnapshotRef.current = true;
+    setRemoteStatus('ready');
+  }, []);
+
+  const refreshRemoteData = useCallback(async (options: RefreshOptions = {}) => {
     if (!isSignedIn || !userId) return;
-    setRemoteStatus('loading');
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+
+    const maxAgeMs = options.maxAgeMs ?? 60_000;
+    if (!options.force && Date.now() - lastRefreshAtRef.current < maxAgeMs) return;
+
+    const requestPromise = (async () => {
+      setRemoteRefreshing(true);
+      if (!hasSnapshotRef.current) setRemoteStatus('loading');
+      try {
+        const snapshot = await getBootstrap(getToken);
+        applySnapshot(snapshot);
+        lastRefreshAtRef.current = Date.now();
+        try {
+          await writeBootstrapCache(db, userId, snapshot);
+        } catch (error) {
+          console.warn('[Coachlander] No se pudo guardar la caché de bootstrap', error);
+        }
+      } catch (error) {
+        if (!hasSnapshotRef.current) setRemoteStatus('error');
+        throw error;
+      } finally {
+        setRemoteRefreshing(false);
+      }
+    })();
+
+    refreshInFlightRef.current = requestPromise;
     try {
-      const snapshot = await getBootstrap(getToken);
-      setRemoteData({ user: snapshot.user, tables: snapshot.tables });
-      setRole(snapshot.user.role);
-      setDraft((current) => ({
-        ...current,
-        role: snapshot.user.role,
-        name: snapshot.user.displayName ?? current.name,
-        email: snapshot.user.email ?? current.email,
-        soloTraining: snapshot.user.soloTraining,
-      }));
-      setRemoteStatus('ready');
-    } catch (error) {
-      setRemoteStatus('error');
-      throw error;
+      await requestPromise;
+    } finally {
+      if (refreshInFlightRef.current === requestPromise) refreshInFlightRef.current = null;
     }
-  }, [getToken, isSignedIn, userId]);
+  }, [applySnapshot, db, getToken, isSignedIn, userId]);
 
   useEffect(() => {
     if (!isLoaded) return;
 
     if (!isSignedIn || !userId) {
-      syncedUserRef.current = null;
+      const previousUserId = initializedUserRef.current;
+      initializedUserRef.current = null;
+      hasSnapshotRef.current = false;
+      lastRefreshAtRef.current = 0;
+      if (previousUserId) void deleteBootstrapCache(db, previousUserId);
       setRemoteData(emptyRemoteData);
       setRemoteStatus('idle');
+      setRemoteRefreshing(false);
       setRole('athlete');
       return;
     }
 
-    if (syncedUserRef.current === userId) return;
-    syncedUserRef.current = userId;
+    if (initializedUserRef.current === userId) return;
+    initializedUserRef.current = userId;
+    hasSnapshotRef.current = false;
+    lastRefreshAtRef.current = 0;
+    setRemoteData(emptyRemoteData);
+    setRemoteStatus('idle');
 
-    void refreshRemoteData()
-      .catch((error: unknown) => {
-        syncedUserRef.current = null;
-        console.warn('[Coachlander] No se pudo cargar el backend', error);
-      });
-  }, [isLoaded, isSignedIn, refreshRemoteData, userId]);
+    void (async () => {
+      const cached = await readBootstrapCache(db, userId);
+      if (cached && initializedUserRef.current === userId) applySnapshot(cached);
+      try {
+        await refreshRemoteData({ force: true });
+      } catch (error: unknown) {
+        console.warn('[Coachlander] No se pudo actualizar el backend', error);
+      }
+    })();
+  }, [applySnapshot, db, isLoaded, isSignedIn, refreshRemoteData, userId]);
 
   const patchDraft = useCallback(
     (patch: Partial<OnboardingDraft>) => {
@@ -145,6 +195,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const currentEmail = remoteData.user?.email?.trim().toLowerCase() ?? '';
+    const currentUserId = initializedUserRef.current;
     try {
       if (EPHEMERAL_TEST_EMAIL && currentEmail === EPHEMERAL_TEST_EMAIL) {
         try {
@@ -164,18 +215,24 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         console.warn('[Coachlander] Clerk no pudo cerrar la sesi\u00f3n', error);
       }
     } finally {
+      if (currentUserId) await deleteBootstrapCache(db, currentUserId);
+      initializedUserRef.current = null;
+      hasSnapshotRef.current = false;
+      lastRefreshAtRef.current = 0;
       setRemoteData(emptyRemoteData);
       setRemoteStatus('idle');
+      setRemoteRefreshing(false);
       setDraft(emptyDraft);
       setRole('athlete');
     }
-  }, [clerkSignOut, emptyDraft, getToken, remoteData.user?.email]);
+  }, [clerkSignOut, db, emptyDraft, getToken, remoteData.user?.email]);
 
   const value = useMemo<AppState>(
     () => ({
       authReady: isLoaded,
       signedIn: isLoaded && !!isSignedIn,
       remoteStatus,
+      remoteRefreshing,
       retryRemoteData: refreshRemoteData,
       role,
       unit: 'kg',
@@ -230,7 +287,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         });
       },
     }),
-    [draft, getToken, isLoaded, isSignedIn, patchDraft, refreshRemoteData, remoteStatus, role, signOut],
+    [draft, getToken, isLoaded, isSignedIn, patchDraft, refreshRemoteData, remoteRefreshing, remoteStatus, role, signOut],
   );
 
   return (

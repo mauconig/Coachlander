@@ -253,7 +253,7 @@ function AddRoutineSheet({
         weekStart,
         replace: true,
       });
-      await refreshRemoteData();
+      await refreshRemoteData({ force: true });
       setPendingTemplateId(null);
       onClose();
     } catch (error: unknown) {

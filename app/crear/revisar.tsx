@@ -55,8 +55,8 @@ export default function CreatorReview() {
               <Txt variant="label" tone={color.lime} style={styles.dayLabel}>
                 {`DÍA ${day.day} · ${day.name.toUpperCase()}`}
               </Txt>
-              {day.exercises.map((exercise) => (
-                <View key={exercise.id} style={styles.exerciseWrap}>
+              {day.exercises.map((exercise, index) => (
+                <View key={`${exercise.id}-${day.day}-${index}`} style={styles.exerciseWrap}>
                   <Row
                     left={<Icon name="check" size={13} tone={color.lime} weight={2.6} />}
                     title={exercise.name}

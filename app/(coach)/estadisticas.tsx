@@ -178,7 +178,7 @@ function StatsContent({
         {recentSessions.length ? (
           recentSessions.slice(0, 5).map((session, index) => (
             <CoachHistoryRow
-              key={session.id}
+              key={`${session.id}-${index}`}
               session={session}
               showClient={!hasSelectedClient}
               latest={index === 0}

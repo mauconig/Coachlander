@@ -35,6 +35,7 @@ export function CoachHistoryRow({
       title={session.name}
       meta={details}
       onPress={onPress}
+      chevron={!!onPress}
     />
   );
 }
